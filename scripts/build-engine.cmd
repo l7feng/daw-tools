@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 cd /d "%~dp0.."
 
 "D:\Ai-Files\Tools\BuildEnv\py312\python.exe" scripts\prepare-validation.py
