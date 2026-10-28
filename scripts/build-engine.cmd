@@ -1,6 +1,8 @@
 @echo off
 cd /d "%~dp0.."
 
+"D:\Ai-Files\Tools\BuildEnv\py312\python.exe" scripts\prepare-validation.py
+if errorlevel 1 exit /b 1
 call "D:\Ai-Files\Tools\BuildEnv\vs2022-cpp\VC\Auxiliary\Build\vcvars64.bat"
 
 if errorlevel 1 exit /b 1
