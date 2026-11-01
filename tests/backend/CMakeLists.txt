@@ -30,3 +30,5 @@ if(NOT EXISTS "${STUDIO_ASIO_COMMON}/iasiodrv.h")
 endif()
 target_include_directories(BackendProbe PRIVATE "${STUDIO_ASIO_COMMON}")
 target_compile_definitions(BackendProbe PRIVATE JUCE_ASIO=1)
+
+include(midi_targets.cmake)
