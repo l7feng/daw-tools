@@ -32,3 +32,11 @@ target_include_directories(BackendProbe PRIVATE "${STUDIO_ASIO_COMMON}")
 target_compile_definitions(BackendProbe PRIVATE JUCE_ASIO=1)
 
 include(midi_targets.cmake)
+
+juce_add_plugin(StudioTestTail COMPANY_NAME "StudioWorkbench" PLUGIN_MANUFACTURER_CODE Stwb
+ PLUGIN_CODE Sttl FORMATS VST3 PRODUCT_NAME "Studio Test Tail" VERSION 0.1.0
+ IS_SYNTH FALSE NEEDS_MIDI_INPUT FALSE NEEDS_MIDI_OUTPUT FALSE COPY_PLUGIN_AFTER_BUILD FALSE)
+target_sources(StudioTestTail PRIVATE tail_fixture.cpp)
+target_compile_features(StudioTestTail PRIVATE cxx_std_20)
+target_compile_definitions(StudioTestTail PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
+target_link_libraries(StudioTestTail PRIVATE juce::juce_audio_utils)

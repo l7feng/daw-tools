@@ -6,5 +6,5 @@ if errorlevel 1 exit /b 1
 set "BACKEND_CMAKE=D:\Ai-Files\Tools\BuildEnv\vs2022-cpp\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
 "%BACKEND_CMAKE%" -S tests/backend -B build/backend -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MAKE_PROGRAM="D:/Ai-Files/Tools/BuildEnv/vs2022-cpp/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe"
 if errorlevel 1 exit /b 1
-"%BACKEND_CMAKE%" --build build/backend --target BackendProbe StudioTestDelay_VST3 StudioMidiFixture_VST3 -j 4
+"%BACKEND_CMAKE%" --build build/backend --target BackendProbe StudioTestDelay_VST3 StudioMidiFixture_VST3 StudioTestTail_VST3 -j 4
 exit /b %errorlevel%
