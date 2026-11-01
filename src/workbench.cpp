@@ -4,6 +4,7 @@
 #include "../tests/editor_cases.hpp"
 #include "../tests/mixer_cases.hpp"
 #include "export_job.hpp"
+#include "stem_job.hpp"
 #include "../tests/export_cases.hpp"
 #include "editor.hpp"
 class Window final:public juce::DocumentWindow {
@@ -33,6 +34,7 @@ public:
             if(args.contains("--scan-plugin")){scanPlugin(root);quit();return;}
             session=std::make_unique<Session>(root);
             if(args.contains("--ui-snapshot")){MainPanel panel(*session);panel.setSize(1360,900);auto shot=panel.createComponentSnapshot(panel.getLocalBounds());juce::PNGImageFormat png;auto stream=root.getChildFile("gui-preview.png").createOutputStream();require(stream&&png.writeImageToStream(shot,*stream),"GUI snapshot failed");quit();}
+            else if(args.contains("--stem-worker")){stemWorker(*session);quit();}
             else if(args.contains("--render-worker")){renderWorker(*session);quit();}
             else if(args.contains("--self-test")) {offlineTest(*session);editorTest(*session);crossfadeTest(*session);mixerTest(*session);exportTest(*session);root.getChildFile("PASS.txt").replaceWithText("Offline signal and persistence passed; no audio devices opened.");quit();}
             else window=std::make_unique<Window>(*session);
