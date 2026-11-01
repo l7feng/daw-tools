@@ -3,114 +3,126 @@
 #include <array>
 inline juce::String zh(const char* text){return juce::String::fromUTF8(text);}
 #include "plugin_panel.hpp"
+namespace EditStyle {
+static juce::Colour bg{0xff252729},panel{0xff303335},edge{0xff141719},text{0xffd8dadd},muted{0xff9ba2a5},accent{0xff2ba4d4},green{0xff47e78a};
+static juce::Colour trackColour(int index){const juce::uint32 colours[]={0xff4d9fd1,0xff39b6bc,0xffab75d3,0xffc6b850,0xff5bb878,0xffce7a65};return juce::Colour(colours[unsigned(index)%6]);}
+static juce::String clock(int64_t n){auto ms=std::max<int64_t>(0,n)*1000/48000;return juce::String(ms/60000)+":"+juce::String((ms/1000)%60).paddedLeft('0',2)+"."+juce::String(ms%1000).paddedLeft('0',3);}
+static juce::String timecode(int64_t n){auto f=std::max<int64_t>(0,n)*30/48000;return juce::String(f/108000).paddedLeft('0',2)+":"+juce::String((f/1800)%60).paddedLeft('0',2)+":"+juce::String((f/30)%60).paddedLeft('0',2)+":"+juce::String(f%30).paddedLeft('0',2);}
+class Look final:public juce::LookAndFeel_V4 {
+public:
+ Look(){setColour(juce::PopupMenu::backgroundColourId,bg);setColour(juce::PopupMenu::textColourId,text);setColour(juce::PopupMenu::highlightedBackgroundColourId,accent.darker(0.4f));setColour(juce::ComboBox::backgroundColourId,panel);setColour(juce::ComboBox::textColourId,text);setColour(juce::ComboBox::outlineColourId,edge);setColour(juce::TextButton::textColourOffId,text);setColour(juce::TextButton::textColourOnId,juce::Colours::white);setColour(juce::Label::textColourId,text);setColour(juce::Slider::thumbColourId,accent);setColour(juce::Slider::trackColourId,accent);setColour(juce::ScrollBar::thumbColourId,juce::Colour(0xff61676b));}
+ void drawButtonBackground(juce::Graphics& g,juce::Button& b,const juce::Colour&,bool over,bool down)override{auto box=b.getLocalBounds().toFloat().reduced(0.5f);auto c=b.getToggleState()?accent.darker(0.35f):panel.brighter(over?0.15f:0.03f);if(down)c=c.darker();g.setColour(c.withAlpha(b.isEnabled()?1.0f:0.4f));g.fillRect(box);g.setColour(edge);g.drawRect(box,1);}
+ juce::Font getTextButtonFont(juce::TextButton&,int h)override{return juce::Font(juce::FontOptions(float(std::min(13,h-5))));}
+};
+}
+class SyncViewport final:public juce::Viewport {public:std::function<void(juce::Rectangle<int>)> moved;void visibleAreaChanged(const juce::Rectangle<int>& a)override{if(moved)moved(a);}};
 class Timeline final:public juce::Component,private juce::ChangeListener {
 public:
-    Session& session;
-    int selected=-1,selectedTrack=0;
-    int64_t cursor=0,grid=480;
-    double scale=120;
-    std::function<void()> changed;
-    std::function<void(std::function<void()>)> execute;
-    juce::AudioFormatManager formats;juce::AudioThumbnailCache cache{24};
-    std::map<juce::String,std::unique_ptr<juce::AudioThumbnail>> thumbnails;
-    explicit Timeline(Session& s):session(s){formats.registerBasicFormats();}
-    ~Timeline() override {for(auto& item:thumbnails)item.second->removeChangeListener(this);}
-    int x(int64_t sample) const {return 160+int(std::llround(double(sample)*scale/48000.0));}
-    int64_t at(float px) const {auto n=std::max<int64_t>(0,std::llround((px-160)*48000.0/scale));return grid>1?std::llround(double(n)/grid)*grid:n;}
-    te::Clip* selection()const {auto clips=session.clips();return selected>=0&&selected<clips.size()?clips[selected]:nullptr;}
-    void refresh(){setSize(std::max(960,x(std::max<int64_t>(480000,Session::samples(tracktion::TimePosition::fromSeconds(session.edit->getLength().inSeconds()))+48000))),std::max(400,42+te::getAudioTracks(*session.edit).size()*90));repaint();}
-    juce::Rectangle<int> bounds(te::Clip& c,int row)const {auto p=c.getPosition();return {x(Session::samples(p.getStart())),44+row*90,std::max(3,x(Session::samples(p.getEnd()))-x(Session::samples(p.getStart()))),72};}
-    void paint(juce::Graphics& g)override {
-        g.fillAll(juce::Colour(0xff151b24));auto area=g.getClipBounds();
-        auto base=std::pow(10.0,std::floor(std::log10(100.0/scale)));auto ratio=100.0/scale/base;
-        auto step=std::max(1.0/48000.0,base*(ratio<=1?1:ratio<=2?2:ratio<=5?5:10));
-        for(double t=std::max(0.0,std::floor((area.getX()-160)/scale/step)*step);160+t*scale<area.getRight();t+=step){int px=160+int(t*scale);g.setColour(juce::Colour(0xff344151));g.drawVerticalLine(px,30,float(getHeight()));g.setColour(juce::Colours::lightgrey);g.drawText(juce::String(t,step<0.001?5:3),px+3,4,85,22,juce::Justification::left);}
-        auto tracks=te::getAudioTracks(*session.edit);int index=0;
-        for(int row=0;row<tracks.size();++row){g.setColour(row==selectedTrack?juce::Colour(0xff35465a):juce::Colour(0xff232d39));g.fillRect(0,40+row*90,158,88);g.setColour(juce::Colours::white);g.drawText(tracks[row]->getName(),12,48+row*90,140,26,juce::Justification::left);
-            for(auto* clip:tracks[row]->getClips()){
-                auto box=bounds(*clip,row);g.setColour(index==selected?juce::Colour(0xff3c8f9a):juce::Colour(0xff34506b));g.fillRoundedRectangle(box.toFloat(),4);g.setColour(juce::Colours::white);g.drawText(clip->getName(),box.reduced(5).removeFromTop(20),juce::Justification::left);
-                if(auto* audio=dynamic_cast<te::WaveAudioClip*>(clip)){
-                    auto file=audio->getAudioFile().getFile();auto key=file.getFullPathName();
-                    if(!thumbnails.contains(key)&&file.existsAsFile()){auto thumb=std::make_unique<juce::AudioThumbnail>(256,formats,cache);thumb->addChangeListener(this);thumb->setSource(new juce::FileInputSource(file));thumbnails[key]=std::move(thumb);}
-                    if(auto it=thumbnails.find(key);it!=thumbnails.end()){g.setColour(juce::Colour(0xffb5dfd6));auto wave=box.reduced(4);wave.removeFromTop(22);auto p=clip->getPosition();it->second->drawChannels(g,wave,p.getOffset().inSeconds(),p.getOffset().inSeconds()+p.getLength().inSeconds(),0.85f);}
-                }
-                ++index;
-            }
-        }
-        if(tracks.isEmpty()){g.setColour(juce::Colours::lightgrey);g.drawText(zh("空白工程：添加轨道或拖入 WAV/BWF 文件"),180,90,600,30,juce::Justification::left);}
-        g.setColour(juce::Colour(0xffe7b46c));g.drawVerticalLine(x(cursor),30,float(getHeight()));
-    }
-    void mouseDown(const juce::MouseEvent& e)override {
-        selectedTrack=std::clamp((e.y-40)/90,0,std::max(0,te::getAudioTracks(*session.edit).size()-1));cursor=at(e.position.x);selected=-1;
-        auto clips=session.clips();for(int i=clips.size();--i>=0;)if(clips[i]->getTrack()==te::getAudioTracks(*session.edit)[selectedTrack]&&bounds(*clips[i],selectedTrack).contains(e.getPosition())){selected=i;break;}
-        dragX=e.x;if(auto* c=selection())dragStart=Session::samples(c->getPosition().getStart());
-        repaint();if(changed)changed();
-    }
-    void mouseUp(const juce::MouseEvent& e)override {
-        if(auto* c=selection();c&&std::abs(e.x-dragX)>3){auto target=std::max<int64_t>(0,dragStart+std::llround((e.x-dragX)*48000.0/scale));if(grid>1)target=std::llround(double(target)/grid)*grid;execute([this,c,target]{session.move(*c,target);});}
-    }
-private:
-    int dragX=0;int64_t dragStart=0;
-    void changeListenerCallback(juce::ChangeBroadcaster*)override{repaint();}
+ static constexpr int rowHeight=94;
+ Session& session;int selected=-1,selectedTrack=0;int64_t cursor=0,grid=480,selectionStart=0,selectionEnd=0;double scale=12;int tool=0;
+ std::function<void()> changed;std::function<void(std::function<void()>)> execute;
+ juce::AudioFormatManager formats;juce::AudioThumbnailCache cache{24};std::map<juce::String,std::unique_ptr<juce::AudioThumbnail>> thumbnails;
+ explicit Timeline(Session& s):session(s){formats.registerBasicFormats();}
+ ~Timeline()override{for(auto& item:thumbnails)item.second->removeChangeListener(this);}
+ int x(int64_t n)const{return int(std::llround(double(n)*scale/48000.0));}
+ int64_t at(float px)const{auto n=std::max<int64_t>(0,std::llround(px*48000.0/scale));return grid>1?std::llround(double(n)/grid)*grid:n;}
+ te::Clip* selection()const{auto clips=session.clips();return selected>=0&&selected<clips.size()?clips[selected]:nullptr;}
+ void refresh(){setSize(std::max(1200,x(std::max<int64_t>(2880000,Session::samples(tracktion::TimePosition::fromSeconds(session.edit->getLength().inSeconds()))+480000))),std::max(500,(te::getAudioTracks(*session.edit).size()+1)*rowHeight));repaint();}
+ juce::Rectangle<int> bounds(te::Clip& c,int row)const{auto p=c.getPosition();return {x(Session::samples(p.getStart())),row*rowHeight+3,std::max(3,x(Session::samples(p.getEnd()))-x(Session::samples(p.getStart()))),rowHeight-6};}
+ void paint(juce::Graphics& g)override{
+  g.fillAll(EditStyle::bg);auto area=g.getClipBounds();auto tracks=te::getAudioTracks(*session.edit);
+  for(int row=0;row<=tracks.size();++row){g.setColour(row==selectedTrack?juce::Colour(0xff35434a):juce::Colour(row%2?0xff34383a:0xff303436));g.fillRect(0,row*rowHeight,getWidth(),rowHeight-1);g.setColour(EditStyle::edge);g.drawHorizontalLine((row+1)*rowHeight-1,0,float(getWidth()));}
+  double step=scale<20?10:scale<60?5:scale<180?1:0.25;for(double t=std::max(0.0,std::floor(area.getX()/scale/step)*step);t*scale<area.getRight();t+=step){g.setColour(juce::Colour(0xff454b4e));g.drawVerticalLine(int(t*scale),float(area.getY()),float(area.getBottom()));}
+  if(selectionEnd>selectionStart){g.setColour(EditStyle::accent.withAlpha(0.10f));g.fillRect(x(selectionStart),0,x(selectionEnd)-x(selectionStart),getHeight());}
+  int index=0;for(int row=0;row<tracks.size();++row)for(auto* clip:tracks[row]->getClips()){
+   auto box=bounds(*clip,row);auto colour=EditStyle::trackColour(row);g.setColour(colour.darker(0.65f));g.fillRect(box);g.setColour(index==selected?juce::Colours::white:colour);g.drawRect(box,index==selected?2:1);g.setColour(colour.darker(0.9f));g.fillRect(box.withHeight(19).reduced(1));g.setColour(EditStyle::text);g.setFont(12);g.drawText(clip->getName(),box.reduced(5).removeFromTop(17),juce::Justification::left,true);
+   if(auto* audio=dynamic_cast<te::WaveAudioClip*>(clip)){auto file=audio->getAudioFile().getFile();auto key=file.getFullPathName();if(!thumbnails.contains(key)&&file.existsAsFile()){auto thumb=std::make_unique<juce::AudioThumbnail>(128,formats,cache);thumb->addChangeListener(this);thumb->setSource(new juce::FileInputSource(file));thumbnails[key]=std::move(thumb);}if(auto it=thumbnails.find(key);it!=thumbnails.end()){g.setColour(colour.brighter(0.35f));auto wave=box.reduced(3);wave.removeFromTop(20);auto p=clip->getPosition();it->second->drawChannels(g,wave,p.getOffset().inSeconds(),p.getOffset().inSeconds()+p.getLength().inSeconds(),0.88f);}}++index;
+  }
+  if(tracks.isEmpty()){g.setColour(EditStyle::muted);g.setFont(14);g.drawText(zh("空白工程 · 拖入音频，或从“轨道”菜单新建"),28,135,700,30,juce::Justification::left);}g.setColour(juce::Colour(0xffe3c955));g.drawVerticalLine(x(cursor),0,float(getHeight()));
+ }
+ void mouseDown(const juce::MouseEvent& e)override{auto tracks=te::getAudioTracks(*session.edit);int row=e.y/rowHeight;selectedTrack=row<tracks.size()?row:-1;cursor=at(e.position.x);selectionStart=selectionEnd=cursor;selected=-1;auto clips=session.clips();if(selectedTrack>=0)for(int i=clips.size();--i>=0;)if(clips[i]->getTrack()==tracks[selectedTrack]&&bounds(*clips[i],selectedTrack).contains(e.getPosition())){selected=i;break;}dragX=e.x;if(auto* c=selection()){dragStart=Session::samples(c->getPosition().getStart());dragEnd=Session::samples(c->getPosition().getEnd());trimLeft=e.x<bounds(*c,selectedTrack).getCentreX();}repaint();if(changed)changed();}
+ void mouseDrag(const juce::MouseEvent& e)override{if(tool==0){selectionStart=std::min(at(float(dragX)),at(e.position.x));selectionEnd=std::max(at(float(dragX)),at(e.position.x));repaint();if(changed)changed();}}
+ void mouseUp(const juce::MouseEvent& e)override{if(auto* c=selection();c&&std::abs(e.x-dragX)>3&&tool!=0){auto delta=std::llround((e.x-dragX)*48000.0/scale);if(tool==2){auto target=std::max<int64_t>(0,dragStart+delta);if(grid>1)target=std::llround(double(target)/grid)*grid;execute([this,c,target]{session.move(*c,target);});}else{auto edge=at(e.position.x);execute([this,c,edge]{session.trim(*c,trimLeft?edge:dragStart,trimLeft?dragEnd:edge);});}}}
+private:int dragX=0;int64_t dragStart=0,dragEnd=0;bool trimLeft=false;void changeListenerCallback(juce::ChangeBroadcaster*)override{repaint();}
 };
-class MainPanel final:public juce::Component,public juce::FileDragAndDropTarget,private juce::Timer {
+class TimeRuler final:public juce::Component {
+public:Timeline& timeline;int scrollX=0;explicit TimeRuler(Timeline& t):timeline(t){}
+ void paint(juce::Graphics& g)override{g.fillAll(EditStyle::panel);double step=timeline.scale<20?10:timeline.scale<60?5:timeline.scale<180?1:0.25;g.setFont(11);for(int row=0;row<3;++row){g.setColour(EditStyle::edge);g.drawHorizontalLine(row*22+21,0,float(getWidth()));}for(double t=std::max(0.0,std::floor(scrollX/timeline.scale/step)*step);t*timeline.scale-scrollX<getWidth();t+=step){int px=int(t*timeline.scale)-scrollX;g.setColour(juce::Colour(0xff555c60));g.drawVerticalLine(px,0,44);g.setColour(EditStyle::text);auto samples=int64_t(t*48000);g.drawText(EditStyle::clock(samples),px+4,0,90,20,juce::Justification::left);g.setColour(EditStyle::muted);g.drawText(EditStyle::timecode(samples),px+4,22,90,20,juce::Justification::left);}g.setColour(juce::Colour(0xffe3c955));int px=timeline.x(timeline.cursor)-scrollX;g.fillRect(px,44,2,22);g.drawText(zh("光标"),px+5,44,60,20,juce::Justification::left);}
+ void mouseDown(const juce::MouseEvent& e)override{timeline.cursor=timeline.at(float(e.x+scrollX));timeline.repaint();if(timeline.changed)timeline.changed();}
+};
+class TrackStrip final:public juce::Component {
 public:
-    enum Command {addTrack,importFile,saveProject,openProject,saveCopy,undoEdit,redoEdit,splitClip,copyClip,removeClip,moveClip,trimClip,envelope,exportWave,saveUserTemplate,openUserTemplate,relinkMedia,crossfadeClips,recovery,plugins};
-    ExportJob exportJob;juce::TextButton cancelExport{zh("取消导出")};juce::ComboBox exportDepth;
-    Session& session;Timeline timeline;juce::Viewport viewport;
-    juce::Label title,status,help;
-    std::array<juce::Label,10> fieldLabels;juce::Label clipHeading,mixHeading;
-    juce::TextEditor start,end,cursor,gain,fadeIn,fadeOut;
-    juce::TextEditor trackDb,trackPan,masterDb,sendDb;
-    juce::ToggleButton mute{zh("静音")},solo{zh("独奏")},preSend{zh("推子前发送")};
-    juce::ComboBox outputTrack;juce::Label mixHelp;
-    juce::TextButton applyMix{zh("应用混音")},busButton{zh("添加总线")},routeButton{zh("设置输出")},sendButton{zh("添加发送")};
-    juce::Slider zoom;juce::ToggleButton snap{zh("吸附 10ms")};
-    std::vector<std::unique_ptr<juce::TextButton>> buttons;
-    std::unique_ptr<juce::FileChooser> chooser;std::unique_ptr<PluginsWindow> pluginWindow;
-    explicit MainPanel(Session& s):session(s),timeline(s){
-        setWantsKeyboardFocus(true);viewport.setViewedComponent(&timeline,false);addAndMakeVisible(viewport);
-        title.setText(zh("Studio Workbench · 编辑工作站 0.1.3"),juce::dontSendNotification);title.setFont(juce::FontOptions(23));addAndMakeVisible(title);addAndMakeVisible(status);addAndMakeVisible(help);
-        const std::pair<const char*,Command> specs[]={{"添加轨道",addTrack},{"导入音频",importFile},{"保存",saveProject},{"打开",openProject},{"另存为",saveCopy},{"撤销",undoEdit},{"重做",redoEdit},{"切分",splitClip},{"复制",copyClip},{"删除片段",removeClip},{"移动",moveClip},{"裁剪",trimClip},{"应用增益/淡化",envelope},{"导出 WAV",exportWave},{"保存自定模板",saveUserTemplate},{"从模板新建",openUserTemplate},{"重定位素材",relinkMedia},{"交叉淡化",crossfadeClips},{"保存恢复点",recovery},{"插件链",plugins}};
-        for(auto [label,command]:specs){auto b=std::make_unique<juce::TextButton>(zh(label));b->setWantsKeyboardFocus(false);b->onClick=[this,command]{perform(command);};addAndMakeVisible(*b);buttons.push_back(std::move(b));}
-        for(auto* field:{&start,&end,&cursor,&gain,&fadeIn,&fadeOut}){field->setInputRestrictions(18,"0123456789.-");addAndMakeVisible(field);}
-        start.setText("0");end.setText("48000");cursor.setText("0");gain.setText("0");fadeIn.setText("0");fadeOut.setText("0");
-        help.setText(zh("起点 / 终点 / 光标：48kHz 采样位置     增益：dB     淡入 / 淡出：采样数；导出使用起点至终点"),juce::dontSendNotification);
-        zoom.setRange(20,48000,1);zoom.setSkewFactorFromMidPoint(240);zoom.setValue(120);zoom.setSliderStyle(juce::Slider::LinearHorizontal);zoom.setTextBoxStyle(juce::Slider::TextBoxRight,false,72,24);zoom.onValueChange=[this]{timeline.scale=zoom.getValue();timeline.refresh();};addAndMakeVisible(zoom);
-        snap.setToggleState(true,juce::dontSendNotification);snap.onClick=[this]{timeline.grid=snap.getToggleState()?480:1;};addAndMakeVisible(snap);
-        cursor.onReturnKey=[this]{timeline.cursor=cursor.getText().getLargeIntValue();timeline.repaint();};
-        timeline.changed=[this]{grabKeyboardFocus();syncInspector();};timeline.execute=[this](auto fn){action(fn);};
-        for(auto* field:{&trackDb,&trackPan,&masterDb,&sendDb}){field->setInputRestrictions(12,"0123456789.-");field->setText("0");addAndMakeVisible(field);}
-        for(auto* control:std::initializer_list<juce::Component*>{&mute,&solo,&preSend,&outputTrack,&mixHelp,&applyMix,&busButton,&routeButton,&sendButton})addAndMakeVisible(*control);
-        mixHelp.setText(zh("选中轨道：推子 dB / 声像 -1..1 / Master dB / 发送 dB"),juce::dontSendNotification);
-        applyMix.onClick=[this]{action([this]{auto master=masterDb.getText().getDoubleValue();require(std::isfinite(master)&&master>=-120&&master<=24,"Invalid master volume");session.setMix(timeline.selectedTrack,float(trackDb.getText().getDoubleValue()),float(trackPan.getText().getDoubleValue()),mute.getToggleState(),solo.getToggleState());session.setMaster(float(masterDb.getText().getDoubleValue()));});};
-        busButton.onClick=[this]{action([this]{timeline.selectedTrack=session.addBus();syncMixer();});};
-        routeButton.onClick=[this]{action([this]{session.route(timeline.selectedTrack,outputTrack.getSelectedId()-2);});};
-        sendButton.onClick=[this]{action([this]{session.addSend(timeline.selectedTrack,outputTrack.getSelectedId()-2,float(sendDb.getText().getDoubleValue()),preSend.getToggleState());});};
-        exportDepth.addItem("PCM 24-bit",24);exportDepth.addItem("Float 32-bit",32);exportDepth.setSelectedId(24);addAndMakeVisible(exportDepth);addAndMakeVisible(cancelExport);
-        cancelExport.onClick=[this]{action([this]{exportJob.cancel();});};
-        const char* captions[]={"起点 · 采样","终点 · 采样","光标 · 采样","片段增益 · dB","淡入 · 采样","淡出 · 采样","轨道推子 · dB","声像 · -1 到 1","Master · dB","发送 · dB"};
-        for(size_t i=0;i<fieldLabels.size();++i){fieldLabels[i].setText(zh(captions[i]),juce::dontSendNotification);fieldLabels[i].setColour(juce::Label::textColourId,juce::Colour(0xffb7c6d8));addAndMakeVisible(fieldLabels[i]);}
-        clipHeading.setText(zh("片段检查器"),juce::dontSendNotification);mixHeading.setText(zh("轨道混音与路由"),juce::dontSendNotification);addAndMakeVisible(clipHeading);addAndMakeVisible(mixHeading);
-        for(auto* field:{&start,&end,&cursor,&gain,&fadeIn,&fadeOut,&trackDb,&trackPan,&masterDb,&sendDb}){field->setColour(juce::TextEditor::backgroundColourId,juce::Colour(0xff101923));field->setColour(juce::TextEditor::textColourId,juce::Colour(0xffedf4fc));field->setColour(juce::TextEditor::focusedOutlineColourId,juce::Colour(0xff66c9bc));}
-        for(auto& b:buttons){b->setColour(juce::TextButton::buttonColourId,juce::Colour(0xff293a4d));b->setColour(juce::TextButton::textColourOffId,juce::Colour(0xffedf4fc));}
-        buttons[1]->setColour(juce::TextButton::buttonColourId,juce::Colour(0xff24675f));
-        status.setText(zh("就绪 · 离线编辑 · 音频设备未打开"),juce::dontSendNotification);
-        setSize(1360,900);refresh();startTimer(200);
-    }
-    void action(std::function<void()> fn){try{fn();status.setText(zh("操作完成 · 离线模式，音频设备未打开"),juce::dontSendNotification);refresh();}catch(const std::exception& e){status.setText(zh("未执行：")+juce::String::fromUTF8(e.what()),juce::dontSendNotification);}}
-    void refresh(){timeline.refresh();syncMixer();auto missing=session.missingMedia();if(!missing.isEmpty())status.setText(zh("缺失素材：")+juce::String(missing.size())+zh(" 个；请选中片段并重定位素材"),juce::dontSendNotification);repaint();}
-    void syncInspector(){syncMixer();cursor.setText(juce::String(timeline.cursor));if(auto* c=timeline.selection()){start.setText(juce::String(Session::samples(c->getPosition().getStart())));end.setText(juce::String(Session::samples(c->getPosition().getEnd())));if(auto* a=dynamic_cast<te::WaveAudioClip*>(c)){gain.setText(juce::String(a->getGainDB()));fadeIn.setText(juce::String(std::llround(a->getFadeIn().inSeconds()*48000)));fadeOut.setText(juce::String(std::llround(a->getFadeOut().inSeconds()*48000)));}}}
-    void syncMixer(){
-        auto tracks=te::getAudioTracks(*session.edit);outputTrack.clear(juce::dontSendNotification);outputTrack.addItem("Master",1);
-        for(int i=0;i<tracks.size();++i)outputTrack.addItem(tracks[i]->getName(),i+2);
-        if(timeline.selectedTrack>=0&&timeline.selectedTrack<tracks.size()){
-            auto* t=tracks[timeline.selectedTrack];auto* v=t->getVolumePlugin();if(v){trackDb.setText(juce::String(v->getVolumeDb(),2));trackPan.setText(juce::String(v->getPan(),3));}
-            mute.setToggleState(t->isMuted(false),juce::dontSendNotification);solo.setToggleState(t->isSolo(false),juce::dontSendNotification);
-            auto* target=t->getOutput().getDestinationTrack();outputTrack.setSelectedId(target?tracks.indexOf(target)+2:1,juce::dontSendNotification);
-        }else outputTrack.setSelectedId(1,juce::dontSendNotification);
-        masterDb.setText(juce::String(session.edit->getMasterVolumePlugin()->getVolumeDb(),2));
-    }
+ Session& s;int index;std::function<void(std::function<void()>)> act;std::function<void(int)> select;std::function<void(int,int)> insert;
+ juce::TextEditor name;juce::Label mode;juce::TextButton mute{"M"},solo{"S"},output,send{"+"};juce::Slider volume,pan;std::array<juce::TextButton,5> slots;bool syncing=false;
+ TrackStrip(Session& session,int i):s(session),index(i){
+  for(auto* c:std::initializer_list<juce::Component*>{&name,&mode,&mute,&solo,&output,&send,&volume,&pan})addAndMakeVisible(*c);
+  name.setFont(juce::FontOptions(12).withStyle("Bold"));name.setReadOnly(index<0);name.setMultiLine(false);name.setColour(juce::TextEditor::backgroundColourId,EditStyle::panel);name.setColour(juce::TextEditor::outlineColourId,juce::Colours::transparentBlack);name.setColour(juce::TextEditor::focusedOutlineColourId,EditStyle::accent);name.setColour(juce::TextEditor::textColourId,EditStyle::text);name.setTooltip(zh("轨道名称 · Enter确认"));name.onReturnKey=[this]{if(syncing||index<0)return;auto value=name.getText().trim();act([this,value]{require(value.isNotEmpty(),"Track name cannot be empty");s.begin("Rename track");s.trackAt(index).setName(value);});};name.onEscapeKey=[this]{if(index>=0)name.setText(s.trackAt(index).getName(),false);};
+  mode.setText(index<0?"Master":zh("波形"),juce::dontSendNotification);mode.setFont(juce::FontOptions(11));
+  for(auto* b:{&mute,&solo}){b->setClickingTogglesState(true);b->setWantsKeyboardFocus(false);}mute.onClick=[this]{applyMix();};solo.onClick=[this]{applyMix();};mute.setEnabled(index>=0);solo.setEnabled(index>=0);
+  volume.setRange(-120,24,0.1);volume.setSliderStyle(juce::Slider::LinearHorizontal);volume.setTextBoxStyle(juce::Slider::TextBoxRight,false,45,18);volume.setTooltip(zh("音量 · dB；双击归零"));volume.setDoubleClickReturnValue(true,0);volume.onDragEnd=[this]{applyMix();};volume.onValueChange=[this]{if(!syncing&&!volume.isMouseButtonDown())applyMix();};pan.setRange(-1,1,0.01);pan.setSliderStyle(juce::Slider::LinearHorizontal);pan.setTextBoxStyle(juce::Slider::NoTextBox,false,0,0);pan.setDoubleClickReturnValue(true,0);pan.setTooltip(zh("声像；双击居中"));pan.onDragEnd=[this]{applyMix();};pan.onValueChange=[this]{if(!syncing&&!pan.isMouseButtonDown())applyMix();};pan.setEnabled(index>=0);
+  for(int j=0;j<5;++j){auto& b=slots[size_t(j)];addAndMakeVisible(b);b.setWantsKeyboardFocus(false);b.onClick=[this,j]{if(select)select(index);if(insert)insert(index,j);};}output.setWantsKeyboardFocus(false);send.setWantsKeyboardFocus(false);output.onClick=[this]{routeMenu(false);};send.onClick=[this]{routeMenu(true);};output.setEnabled(index>=0);send.setEnabled(index>=0);sync();
+ }
+ void applyMix(){if(syncing)return;act([this]{if(index<0)s.setMaster(float(volume.getValue()));else s.setMix(index,float(volume.getValue()),float(pan.getValue()),mute.getToggleState(),solo.getToggleState());});}
+ void sync(){syncing=true;te::VolumeAndPanPlugin* v=index<0?s.edit->getMasterVolumePlugin().get():s.trackAt(index).getVolumePlugin();if(!name.hasKeyboardFocus(true))name.setText(index<0?"Master":s.trackAt(index).getName(),juce::dontSendNotification);if(!volume.isMouseButtonDown()&&!volume.hasKeyboardFocus(true))volume.setValue(v->getVolumeDb(),juce::dontSendNotification);if(!pan.isMouseButtonDown())pan.setValue(v->getPan(),juce::dontSendNotification);
+  if(index>=0){send.setEnabled(te::getAudioTracks(*s.edit).size()>1);auto& t=s.trackAt(index);mute.setToggleState(t.isMuted(false),juce::dontSendNotification);solo.setToggleState(t.isSolo(false),juce::dontSendNotification);auto* target=t.getOutput().getDestinationTrack();output.setButtonText(target?target->getName():"Master");output.setTooltip(zh("主输出：")+output.getButtonText());auto sends=t.pluginList.getPluginsOfType<te::AuxSendPlugin>();send.setButtonText(sends.isEmpty()?zh("+ 发送"):juce::String(sends.size())+zh(" 发送"));}else output.setButtonText("Output");auto chain=PluginChain::external(s,index);for(int j=0;j<5;++j){auto& b=slots[size_t(j)];b.setButtonText(j<chain.size()?chain[j]->getName()+(!chain[j]->getAudioPluginInstance()?zh(" [缺失]"):chain[j]->isEnabled()?"":zh(" [旁通]")):juce::String::charToString(juce::juce_wchar('A'+j))+"   ·");b.setTooltip(j<chain.size()?chain[j]->getName()+zh(" · 点击打开编辑器"):zh("插入插件"));}syncing=false;repaint();
+ }
+ void routeMenu(bool isSend){juce::PopupMenu menu;if(!isSend)menu.addItem(1,"Master");auto tracks=te::getAudioTracks(*s.edit);for(int j=0;j<tracks.size();++j)if(j!=index){if(isSend){juce::PopupMenu mode;mode.addItem(100+j*2,zh("推子后 · 0 dB"));mode.addItem(101+j*2,zh("推子前 · 0 dB"));menu.addSubMenu(tracks[j]->getName(),mode);}else menu.addItem(j+2,tracks[j]->getName());}menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(isSend?&send:&output),[safe=juce::Component::SafePointer<TrackStrip>(this),isSend](int result){if(!safe||result==0)return;safe->act([safe,result,isSend]{if(isSend)safe->s.addSend(safe->index,(result-100)/2,0,(result-100)%2!=0);else safe->s.route(safe->index,result-2);});});}
+ void resized()override{int w=getWidth();name.setBounds(10,3,138,20);mute.setBounds(12,27,25,21);solo.setBounds(40,27,25,21);mode.setBounds(68,27,76,21);volume.setBounds(10,51,142,20);pan.setBounds(13,73,130,15);for(int j=0;j<5;++j)slots[size_t(j)].setBounds(164,4+j*17,104,16);send.setBounds(278,7,87,22);output.setBounds(375,28,std::max(36,w-383),23);}
+ void paint(juce::Graphics& g)override{g.fillAll(EditStyle::panel);g.setColour(index<0?juce::Colour(0xffba7694):EditStyle::trackColour(index));g.fillRect(0,0,6,getHeight()-1);g.setColour(EditStyle::edge);for(int x:{157,273,370})g.drawVerticalLine(x,0,float(getHeight()));g.drawHorizontalLine(getHeight()-1,0,float(getWidth()));g.setColour(EditStyle::muted);g.setFont(10);g.drawText(zh("输出"),378,6,60,18,juce::Justification::left);}
+ void mouseDown(const juce::MouseEvent&)override{if(select)select(index);}
+};
+class SideList final:public juce::Component {
+public:Session& s;bool clips;int selected=-1;std::function<void(int)> chosen;explicit SideList(Session& session,bool isClips):s(session),clips(isClips){}
+ void paint(juce::Graphics& g)override{g.fillAll(EditStyle::bg);g.setFont(12);int n=clips?s.clips().size():te::getAudioTracks(*s.edit).size()+1;for(int i=0;i<n;++i){if(i==selected){g.setColour(EditStyle::accent.darker(0.5f));g.fillRect(0,i*25,getWidth(),25);}g.setColour(!clips&&i==te::getAudioTracks(*s.edit).size()?juce::Colour(0xffba7694):EditStyle::trackColour(i));g.fillRect(7,i*25+7,6,12);g.setColour(EditStyle::text);auto tracks=te::getAudioTracks(*s.edit);juce::String text=clips?s.clips()[i]->getName():i<tracks.size()?tracks[i]->getName():"Master";g.drawText(text,20,i*25,getWidth()-24,25,juce::Justification::left,true);}}
+ void refresh(){setSize(std::max(100,getWidth()),std::max(150,(clips?s.clips().size():te::getAudioTracks(*s.edit).size()+1)*25));repaint();}
+ void mouseDown(const juce::MouseEvent& e)override{int n=clips?s.clips().size():te::getAudioTracks(*s.edit).size()+1;int i=e.y/25;if(i<n&&chosen)chosen(i);}
+};
+class MainPanel final:public juce::Component,public juce::FileDragAndDropTarget,private juce::Timer,private juce::MenuBarModel {
+public:
+ enum Command {addTrack,importFile,saveProject,openProject,saveCopy,undoEdit,redoEdit,splitClip,copyClip,removeClip,moveClip,trimClip,envelope,exportWave,saveUserTemplate,openUserTemplate,relinkMedia,crossfadeClips,recovery,plugins};
+ EditStyle::Look look;juce::TooltipWindow tips{this,650};ExportJob exportJob;juce::TextButton cancelExport{zh("取消导出")};juce::ComboBox exportDepth;
+ Session& session;Timeline timeline;TimeRuler ruler;SyncViewport viewport,trackViewport;juce::Component strips;juce::Viewport navViewport,clipViewport;SideList nav,clipList;
+ juce::MenuBarComponent menu{this};juce::Label title,status,help,counter;std::array<juce::Label,10> fieldLabels;juce::Label clipHeading,mixHeading;
+ juce::TextEditor start,end,cursor,gain,fadeIn,fadeOut,trackDb,trackPan,masterDb,sendDb;juce::ToggleButton mute{zh("静音")},solo{zh("独奏")},preSend{zh("推子前")};juce::ComboBox outputTrack;juce::Label mixHelp;
+ juce::TextButton applyMix{zh("应用混音")},busButton{zh("添加总线")},routeButton{zh("设置输出")},sendButton{zh("添加发送")};juce::Slider zoom;juce::ToggleButton snap{zh("吸附")};
+ std::vector<std::unique_ptr<juce::TextButton>> buttons;std::unique_ptr<juce::FileChooser> chooser;std::unique_ptr<PluginsWindow> pluginWindow;std::unique_ptr<HostedPluginWindow> inlineEditor;
+ std::array<juce::TextButton,4> modes;std::array<juce::TextButton,3> tools;std::array<juce::TextButton,5> transport;juce::TextButton properties{zh("片段属性")},tasks{zh("任务")},routing{zh("路由属性")};juce::ComboBox gridSize;
+ std::vector<std::unique_ptr<TrackStrip>> rows;bool syncingScroll=false,showLeft=true,showRight=true,persist=false;int leftWidth=165,rightWidth=190,controlWidth=480,bottomMode=0;int dragDivider=0;te::Edit* rowEdit=nullptr;int rowCount=-1;int64_t lastSnapshot=0;int snapshotTicks=0;
+ explicit MainPanel(Session& s,bool keepLayout=false):session(s),timeline(s),ruler(timeline),nav(s,false),clipList(s,true),persist(keepLayout){
+  setLookAndFeel(&look);setWantsKeyboardFocus(true);viewport.setViewedComponent(&timeline,false);trackViewport.setViewedComponent(&strips,false);trackViewport.setScrollBarsShown(false,false);navViewport.setViewedComponent(&nav,false);clipViewport.setViewedComponent(&clipList,false);navViewport.setScrollBarsShown(true,false);clipViewport.setScrollBarsShown(true,false);
+  for(auto* c:std::initializer_list<juce::Component*>{&menu,&viewport,&trackViewport,&ruler,&navViewport,&clipViewport,&status,&counter,&zoom,&snap,&properties,&tasks,&routing,&gridSize})addAndMakeVisible(*c);
+  viewport.moved=[this](auto a){if(!syncingScroll){syncingScroll=true;trackViewport.setViewPosition(0,a.getY());syncingScroll=false;}ruler.scrollX=a.getX();ruler.repaint();};trackViewport.moved=[this](auto a){if(!syncingScroll){syncingScroll=true;viewport.setViewPosition(viewport.getViewPositionX(),a.getY());syncingScroll=false;}};
+  nav.chosen=[this](int i){selectTrack(i<te::getAudioTracks(*session.edit).size()?i:-1,true);};clipList.chosen=[this](int i){timeline.selected=i;auto* c=session.clips()[i];timeline.selectedTrack=te::getAudioTracks(*session.edit).indexOf(dynamic_cast<te::AudioTrack*>(c->getTrack()));timeline.cursor=Session::samples(c->getPosition().getStart());viewport.setViewPosition(std::max(0,timeline.x(timeline.cursor)-40),timeline.selectedTrack*Timeline::rowHeight);syncInspector();};
+  const std::pair<const char*,Command> specs[]={{"添加轨道",addTrack},{"导入音频",importFile},{"保存",saveProject},{"打开",openProject},{"另存为",saveCopy},{"撤销",undoEdit},{"重做",redoEdit},{"切分",splitClip},{"复制",copyClip},{"删除片段",removeClip},{"移动",moveClip},{"裁剪",trimClip},{"应用增益/淡化",envelope},{"导出 WAV",exportWave},{"保存自定模板",saveUserTemplate},{"从模板新建",openUserTemplate},{"重定位素材",relinkMedia},{"交叉淡化",crossfadeClips},{"保存恢复点",recovery},{"插件链",plugins}};
+  for(auto [label,command]:specs){auto b=std::make_unique<juce::TextButton>(zh(label));b->setWantsKeyboardFocus(false);b->onClick=[this,command]{perform(command);};addChildComponent(*b);buttons.push_back(std::move(b));}
+  const char* modesText[]={"SHUFFLE","SPOT","SLIP","GRID"};for(int i=0;i<4;++i){auto& b=modes[size_t(i)];b.setButtonText(modesText[i]);b.setWantsKeyboardFocus(false);addAndMakeVisible(b);b.setEnabled(i>=2);b.setTooltip(i<2?zh("此编辑模式尚未接入"):zh("切换自由编辑/网格吸附"));b.onClick=[this,i]{snap.setToggleState(i==3,juce::dontSendNotification);setGrid();};}
+  const char* toolText[]={"选择","裁剪","抓取"};for(int i=0;i<3;++i){auto& b=tools[size_t(i)];b.setButtonText(zh(toolText[i]));b.setWantsKeyboardFocus(false);addAndMakeVisible(b);b.onClick=[this,i]{setTool(i);};}setTool(0);
+  const char* transportText[]={"|<","<<",">", "[]", "REC"};for(int i=0;i<5;++i){auto& b=transport[size_t(i)];b.setButtonText(transportText[i]);b.setWantsKeyboardFocus(false);addAndMakeVisible(b);b.setEnabled(i==0);b.setTooltip(i==0?zh("定位到工程开头"):i==4?zh("录音工作流暂缓"):zh("设备播放尚未接入此编辑窗口"));}transport[0].onClick=[this]{timeline.cursor=0;viewport.setViewPosition(0,viewport.getViewPositionY());cursor.setText("0",false);updateCounter();timeline.repaint();ruler.repaint();};
+
+  for(auto* field:{&start,&end,&cursor,&gain,&fadeIn,&fadeOut,&trackDb,&trackPan,&masterDb,&sendDb}){field->setInputRestrictions(18,"0123456789.-");field->setText("0");field->setColour(juce::TextEditor::backgroundColourId,juce::Colour(0xff181c1e));field->setColour(juce::TextEditor::textColourId,EditStyle::green);field->setColour(juce::TextEditor::focusedOutlineColourId,EditStyle::accent);addChildComponent(field);}end.setText("48000");cursor.onReturnKey=[this]{timeline.cursor=std::max<int64_t>(0,cursor.getText().getLargeIntValue());updateCounter();timeline.repaint();ruler.repaint();};
+  const char* captions[]={"起点 · 采样","终点 · 采样","光标 · 采样","增益 · dB","淡入 · 采样","淡出 · 采样","推子 · dB","声像 · -1..1","Master · dB","发送 · dB"};for(int i=0;i<10;++i){fieldLabels[size_t(i)].setText(zh(captions[i]),juce::dontSendNotification);fieldLabels[size_t(i)].setFont(juce::FontOptions(11));addChildComponent(fieldLabels[size_t(i)]);}
+  zoom.setRange(5,1000,0.1);zoom.setSkewFactorFromMidPoint(60);zoom.setValue(timeline.scale);zoom.setSliderStyle(juce::Slider::LinearHorizontal);zoom.setTextBoxStyle(juce::Slider::NoTextBox,false,0,0);zoom.setTooltip(zh("时间线水平缩放"));zoom.onValueChange=[this]{auto sample=double(viewport.getViewPositionX())/timeline.scale;timeline.scale=zoom.getValue();timeline.refresh();viewport.setViewPosition(int(sample*timeline.scale),viewport.getViewPositionY());ruler.repaint();};
+  gridSize.addItem("10 ms",1);gridSize.addItem("100 ms",2);gridSize.addItem("1 s",3);gridSize.setSelectedId(1,juce::dontSendNotification);gridSize.setTooltip(zh("绝对时间网格；音乐节拍网格后续接入"));gridSize.onChange=[this]{setGrid();};snap.setToggleState(true,juce::dontSendNotification);snap.onClick=[this]{setGrid();};setGrid();
+  for(auto* c:std::initializer_list<juce::Component*>{&mute,&solo,&preSend,&outputTrack,&applyMix,&busButton,&routeButton,&sendButton,&exportDepth,&cancelExport})addChildComponent(c);
+  applyMix.onClick=[this]{action([this]{if(timeline.selectedTrack>=0)session.setMix(timeline.selectedTrack,float(trackDb.getText().getDoubleValue()),float(trackPan.getText().getDoubleValue()),mute.getToggleState(),solo.getToggleState());session.setMaster(float(masterDb.getText().getDoubleValue()));});};busButton.onClick=[this]{action([this]{timeline.selectedTrack=session.addBus();});};routeButton.onClick=[this]{action([this]{session.route(timeline.selectedTrack,outputTrack.getSelectedId()-2);});};sendButton.onClick=[this]{action([this]{session.addSend(timeline.selectedTrack,outputTrack.getSelectedId()-2,float(sendDb.getText().getDoubleValue()),preSend.getToggleState());});};
+  exportDepth.addItem("PCM 24-bit",24);exportDepth.addItem("Float 32-bit",32);exportDepth.setSelectedId(24);cancelExport.onClick=[this]{action([this]{exportJob.cancel();});};properties.onClick=[this]{bottomMode=bottomMode==1?0:1;resized();};tasks.onClick=[this]{bottomMode=bottomMode==2?0:2;resized();};routing.onClick=[this]{bottomMode=bottomMode==3?0:3;syncMixer();resized();};
+  timeline.changed=[this]{grabKeyboardFocus();syncInspector();};timeline.execute=[this](auto fn){action(fn);};counter.setColour(juce::Label::backgroundColourId,juce::Colour(0xff090d0b));counter.setColour(juce::Label::textColourId,EditStyle::green);counter.setFont(juce::FontOptions(24));counter.setJustificationType(juce::Justification::centred);counter.setTooltip(zh("光标时间码 · 30fps显示基准；下行为分秒，不代表视频同步已接入"));status.setFont(juce::FontOptions(11));status.setText(zh("就绪 · 离线编辑 · 0.1.4"),juce::dontSendNotification);
+  if(persist)if(auto xml=juce::XmlDocument::parse(layoutFile())){leftWidth=std::clamp(xml->getIntAttribute("left",165),130,260);rightWidth=std::clamp(xml->getIntAttribute("right",190),145,320);showLeft=xml->getBoolAttribute("showLeft",true);showRight=xml->getBoolAttribute("showRight",true);timeline.scale=std::clamp(xml->getDoubleAttribute("zoom",12),5.0,1000.0);zoom.setValue(timeline.scale,juce::dontSendNotification);}
+  setSize(1600,900);refresh();startTimer(200);
+ }
+ ~MainPanel()override{stopTimer();viewport.moved=nullptr;trackViewport.moved=nullptr;if(persist){juce::XmlElement xml("LAYOUT");xml.setAttribute("left",leftWidth);xml.setAttribute("right",rightWidth);xml.setAttribute("showLeft",showLeft);xml.setAttribute("showRight",showRight);xml.setAttribute("zoom",timeline.scale);xml.writeTo(layoutFile());}inlineEditor.reset();pluginWindow.reset();setLookAndFeel(nullptr);}
+ juce::File layoutFile()const{return juce::File(STUDIO_SOURCE_ROOT).getChildFile("build/user-gui-layout.xml");}
+ void setTool(int i){timeline.tool=i;for(int j=0;j<3;++j)tools[size_t(j)].setToggleState(i==j,juce::dontSendNotification);timeline.setMouseCursor(i==2?juce::MouseCursor::DraggingHandCursor:i==1?juce::MouseCursor::LeftRightResizeCursor:juce::MouseCursor::IBeamCursor);}
+ void setGrid(){timeline.grid=snap.getToggleState()?(gridSize.getSelectedId()==2?4800:gridSize.getSelectedId()==3?48000:480):1;modes[2].setToggleState(!snap.getToggleState(),juce::dontSendNotification);modes[3].setToggleState(snap.getToggleState(),juce::dontSendNotification);}
+ void updateCounter(){counter.setText(EditStyle::timecode(timeline.cursor)+"\n"+EditStyle::clock(timeline.cursor),juce::dontSendNotification);ruler.repaint();}
+ void selectTrack(int index,bool reveal){timeline.selectedTrack=index;timeline.selected=-1;if(reveal)viewport.setViewPosition(viewport.getViewPositionX(),(index<0?te::getAudioTracks(*session.edit).size():index)*Timeline::rowHeight);syncInspector();grabKeyboardFocus();}
+ void showPlugins(int index){inlineEditor.reset();pluginWindow=std::make_unique<PluginsWindow>(session,index);}
+ void slotClicked(int index,int slot){action([this,index,slot]{auto chain=PluginChain::external(session,index);if(slot<chain.size()){chain[slot]->initialiseFully();if(!chain[slot]->getAudioPluginInstance()){showPlugins(index);return;}pluginWindow.reset();inlineEditor=std::make_unique<HostedPluginWindow>(*chain[slot]);}else showPlugins(index);});}
+ void action(std::function<void()> fn){try{fn();status.setText(zh("操作完成 · 离线编辑"),juce::dontSendNotification);refresh();}catch(const std::exception& e){status.setText(zh("未执行：")+juce::String::fromUTF8(e.what()),juce::dontSendNotification);}}
+ void syncRows(){auto tracks=te::getAudioTracks(*session.edit);if(rowEdit!=session.edit.get()||rowCount!=tracks.size()){rows.clear();rowEdit=session.edit.get();rowCount=tracks.size();for(int i=0;i<=tracks.size();++i){auto row=std::make_unique<TrackStrip>(session,i==tracks.size()?-1:i);row->act=[this](auto fn){action(fn);};row->select=[this](int index){selectTrack(index,false);};row->insert=[this](int index,int slot){slotClicked(index,slot);};strips.addAndMakeVisible(*row);rows.push_back(std::move(row));}strips.setSize(controlWidth,timeline.getHeight()+(viewport.getHorizontalScrollBar().isVisible()?viewport.getScrollBarThickness():0));for(int i=0;i<int(rows.size());++i)rows[size_t(i)]->setBounds(0,i*Timeline::rowHeight,controlWidth,Timeline::rowHeight);}for(auto& row:rows)row->sync();nav.selected=timeline.selectedTrack<0?tracks.size():timeline.selectedTrack;nav.repaint();clipList.selected=timeline.selected;clipList.repaint();}
+ void refresh(){auto count=te::getAudioTracks(*session.edit).size();if(timeline.selectedTrack>=count)timeline.selectedTrack=count>0?count-1:-1;timeline.refresh();syncRows();syncMixer();nav.refresh();clipList.refresh();updateCounter();auto missing=session.missingMedia();if(!missing.isEmpty())status.setText(zh("缺失素材：")+juce::String(missing.size())+zh(" 个 · 文件菜单可重定位"),juce::dontSendNotification);repaint();}
+ void syncInspector(){syncRows();syncMixer();cursor.setText(juce::String(timeline.cursor),false);if(auto* c=timeline.selection()){start.setText(juce::String(Session::samples(c->getPosition().getStart())),false);end.setText(juce::String(Session::samples(c->getPosition().getEnd())),false);if(auto* a=dynamic_cast<te::WaveAudioClip*>(c)){gain.setText(juce::String(a->getGainDB()),false);fadeIn.setText(juce::String(std::llround(a->getFadeIn().inSeconds()*48000)),false);fadeOut.setText(juce::String(std::llround(a->getFadeOut().inSeconds()*48000)),false);}}if(timeline.selectionEnd>timeline.selectionStart){start.setText(juce::String(timeline.selectionStart),false);end.setText(juce::String(timeline.selectionEnd),false);}updateCounter();timeline.repaint();}
+ void syncMixer(){auto tracks=te::getAudioTracks(*session.edit);outputTrack.clear(juce::dontSendNotification);outputTrack.addItem("Master",1);for(int i=0;i<tracks.size();++i)outputTrack.addItem(tracks[i]->getName(),i+2);if(timeline.selectedTrack>=0&&timeline.selectedTrack<tracks.size()){auto* t=tracks[timeline.selectedTrack];auto* v=t->getVolumePlugin();trackDb.setText(juce::String(v->getVolumeDb(),2),false);trackPan.setText(juce::String(v->getPan(),3),false);mute.setToggleState(t->isMuted(false),juce::dontSendNotification);solo.setToggleState(t->isSolo(false),juce::dontSendNotification);auto* target=t->getOutput().getDestinationTrack();outputTrack.setSelectedId(target?tracks.indexOf(target)+2:1,juce::dontSendNotification);}else outputTrack.setSelectedId(1,juce::dontSendNotification);masterDb.setText(juce::String(session.edit->getMasterVolumePlugin()->getVolumeDb(),2),false);}
     void choose(Command command){
 
         auto mode=(command==saveCopy||command==exportWave||command==saveUserTemplate)?juce::FileBrowserComponent::saveMode:juce::FileBrowserComponent::openMode;
@@ -119,16 +131,16 @@ public:
         chooser->launchAsync(mode|juce::FileBrowserComponent::canSelectFiles,[safe=juce::Component::SafePointer<MainPanel>(this),command](const juce::FileChooser& f){if(!safe)return;auto file=f.getResult();if(file==juce::File())return;safe->action([safe,file,command]{
             if(command==importFile)safe->import(file);
             if(command==saveUserTemplate)safe->session.saveTemplate(file.withFileExtension("swtemplate"));
-            if(command==openUserTemplate){safe->pluginWindow.reset();require(!safe->session.edit->hasChangedSinceSaved(),"Save current project before template creation");safe->session.loadTemplate(file);safe->timeline.selected=-1;safe->timeline.selectedTrack=0;}
+            if(command==openUserTemplate){safe->inlineEditor.reset();safe->pluginWindow.reset();require(!safe->session.edit->hasChangedSinceSaved(),"Save current project before template creation");safe->session.loadTemplate(file);safe->timeline.selected=-1;safe->timeline.selectedTrack=0;}
             if(command==relinkMedia){auto* audio=dynamic_cast<te::WaveAudioClip*>(safe->timeline.selection());require(audio!=nullptr,"Select an audio clip");safe->session.relink(*audio,file);}
             if(command==saveCopy)safe->session.saveAs(file.withFileExtension("tracktionedit"));
-            if(command==openProject){safe->pluginWindow.reset();require(!safe->session.edit->hasChangedSinceSaved(),"Save the current project before opening another");safe->session.openProject(file);safe->timeline.selected=-1;safe->timeline.selectedTrack=0;}
+            if(command==openProject){safe->inlineEditor.reset();safe->pluginWindow.reset();require(!safe->session.edit->hasChangedSinceSaved(),"Save the current project before opening another");safe->session.openProject(file);safe->timeline.selected=-1;safe->timeline.selectedTrack=0;}
             if(command==exportWave)safe->exportJob.start(safe->session,file.withFileExtension("wav"),safe->start.getText().getLargeIntValue(),safe->end.getText().getLargeIntValue(),safe->exportDepth.getSelectedId());
         });});
     }
-    void import(const juce::File& f){int track=std::min(timeline.selectedTrack,te::getAudioTracks(*session.edit).size());auto* imported=session.importAudio(f,track,timeline.cursor);timeline.selected=session.clips().indexOf(imported);syncInspector();}
+    void import(const juce::File& f){int track=std::clamp(timeline.selectedTrack,0,te::getAudioTracks(*session.edit).size());auto* imported=session.importAudio(f,track,timeline.cursor);timeline.selected=session.clips().indexOf(imported);timeline.selectedTrack=te::getAudioTracks(*session.edit).indexOf(dynamic_cast<te::AudioTrack*>(imported->getTrack()));syncInspector();}
     void perform(Command command){
-        if(command==plugins){action([this]{pluginWindow=std::make_unique<PluginsWindow>(session,timeline.selectedTrack);});return;}
+        if(command==plugins){action([this]{showPlugins(timeline.selectedTrack);});return;}
         if(command==importFile||command==openProject||command==saveCopy||command==exportWave||command==saveUserTemplate||command==openUserTemplate||command==relinkMedia){choose(command);return;}
         action([this,command]{
             if(command==addTrack){session.begin("Add track");session.addTrack();return;}
@@ -148,45 +160,34 @@ public:
             syncInspector();
         });
     }
-    bool keyPressed(const juce::KeyPress& key)override{
-        if(key.getModifiers().isCommandDown()){
-            if(key.getKeyCode()=='Z'){perform(key.getModifiers().isShiftDown()?redoEdit:undoEdit);return true;}
-            if(key.getKeyCode()=='Y'){perform(redoEdit);return true;}
-            if(key.getKeyCode()=='S'){perform(saveProject);return true;}
-        }
-        if(key.getKeyCode()==juce::KeyPress::deleteKey){perform(removeClip);return true;}return false;
-    }
-    bool isInterestedInFileDrag(const juce::StringArray& files)override{return !files.isEmpty();}
-    void filesDropped(const juce::StringArray& files,int,int)override{action([this,files]{for(auto& f:files)import(juce::File(f));});}
-    int64_t lastSnapshot=0;
-    int snapshotTicks=0;
-    void timerCallback()override{
-        if(exportJob.active){try{juce::String result;if(exportJob.poll(result))status.setText(result=="cancelled"?zh("导出已取消；未生成目标文件"):zh("导出完成：")+result,juce::dontSendNotification);else status.setText(zh("后台导出：")+juce::String(int(exportJob.progress()*100))+"%",juce::dontSendNotification);}catch(const std::exception& e){status.setText(zh("导出未完成：")+juce::String::fromUTF8(e.what()),juce::dontSendNotification);}}
-        if(++snapshotTicks<300)return;snapshotTicks=0;
-        auto changed=session.edit->getTimeOfLastChange().toMilliseconds();if(session.edit->hasChangedSinceSaved()&&changed>lastSnapshot){action([this,changed]{session.checkpoint();lastSnapshot=changed;});}
-    }
-    void resized()override{
-        const int margin=16, side=316, sx=getWidth()-side-margin;
-        title.setBounds(margin,12,getWidth()-32,32);status.setBounds(margin,46,getWidth()-32,24);
-        const int cell=(getWidth()-margin*2)/10;
-        for(size_t i=0;i<buttons.size();++i)buttons[i]->setBounds(margin+int(i%10)*cell,82+int(i/10)*38,cell-6,32);
-        snap.setBounds(margin,162,155,28);zoom.setBounds(180,162,330,28);
-        help.setBounds(margin,getHeight()-32,getWidth()-32,24);
-        viewport.setBounds(margin,204,sx-margin-12,getHeight()-244);
-        clipHeading.setBounds(sx+12,204,side-24,28);
-        juce::TextEditor* clipFields[]={&start,&end,&cursor,&gain,&fadeIn,&fadeOut};
-        for(int i=0;i<6;++i){int x=sx+12+(i%2)*148,y=240+(i/2)*54;fieldLabels[size_t(i)].setBounds(x,y,140,20);clipFields[i]->setBounds(x,y+21,140,28);}
-        mixHeading.setBounds(sx+12,408,side-24,28);
-        juce::TextEditor* mixFields[]={&trackDb,&trackPan,&masterDb,&sendDb};
-        for(int i=0;i<4;++i){int x=sx+12+(i%2)*148,y=444+(i/2)*54;fieldLabels[size_t(i+6)].setBounds(x,y,140,20);mixFields[i]->setBounds(x,y+21,140,28);}
-        mute.setBounds(sx+12,558,70,30);solo.setBounds(sx+86,558,70,30);applyMix.setBounds(sx+164,558,136,30);
-        outputTrack.setBounds(sx+12,600,140,30);routeButton.setBounds(sx+164,600,136,30);
-        preSend.setBounds(sx+12,642,140,30);sendButton.setBounds(sx+164,642,136,30);
-        busButton.setBounds(sx+12,684,140,30);exportDepth.setBounds(sx+164,684,136,30);cancelExport.setBounds(sx+12,726,288,30);
-    }
-    void paint(juce::Graphics& g)override{
-        g.fillAll(juce::Colour(0xff141d28));g.setColour(juce::Colour(0xff202d3c));
-        g.fillRoundedRectangle(float(getWidth()-332),200,316,float(getHeight()-240),8);
-        g.setColour(juce::Colour(0xff34465b));g.drawHorizontalLine(196,16,float(getWidth()-16));
-    }
+
+ juce::StringArray getMenuBarNames()override{return {zh("文件"),zh("编辑"),zh("视图"),zh("轨道"),zh("片段"),zh("选项"),zh("窗口"),zh("帮助")};}
+ juce::PopupMenu getMenuForIndex(int index,const juce::String&)override{juce::PopupMenu m;auto item=[&](Command c,const char* text){m.addItem(100+int(c),zh(text));};if(index==0){item(openProject,"打开工程…");item(importFile,"导入音频…");item(saveProject,"保存    Ctrl+S");item(saveCopy,"另存为…");m.addSeparator();item(recovery,"保存恢复点");item(saveUserTemplate,"保存用户模板…");item(openUserTemplate,"从用户模板新建…");item(relinkMedia,"重定位素材…");m.addSeparator();item(exportWave,"导出 WAV…");}if(index==1){item(undoEdit,"撤销    Ctrl+Z");item(redoEdit,"重做    Ctrl+Shift+Z");item(copyClip,"复制到光标");item(removeClip,"删除片段    Delete");}if(index==2){m.addItem(1,zh("轨道列表"),true,showLeft);m.addItem(2,zh("片段列表"),true,showRight);m.addItem(3,zh("片段属性"),true,bottomMode==1);m.addItem(4,zh("路由属性"),true,bottomMode==3);m.addSeparator();m.addItem(5,zh("恢复默认布局"));}if(index==3){item(addTrack,"新建音轨");m.addItem(6,zh("新建总线"));item(plugins,"插件链…");}if(index==4){item(splitClip,"在光标处切分");item(moveClip,"移动至属性起点");item(trimClip,"按属性范围裁剪");item(envelope,"应用增益与淡化");item(crossfadeClips,"交叉淡化");}if(index==5){m.addItem(7,zh("网格吸附"),true,snap.getToggleState());m.addItem(8,zh("时间码显示：30 fps"),false);}if(index==6){item(plugins,"当前轨道插件链…");m.addItem(9,zh("后台任务"));}if(index==7){m.addItem(10,"Studio Workbench 0.1.4",false);m.addItem(11,zh("设备播放/录音尚未接入此窗口"),false);}return m;}
+ void menuItemSelected(int id,int)override{if(id>=100){perform(Command(id-100));return;}if(id==1)showLeft=!showLeft;if(id==2)showRight=!showRight;if(id==3)bottomMode=bottomMode==1?0:1;if(id==4)bottomMode=bottomMode==3?0:3;if(id==5){showLeft=showRight=true;leftWidth=165;rightWidth=190;bottomMode=0;zoom.setValue(12);}if(id==6)busButton.onClick();if(id==7){snap.setToggleState(!snap.getToggleState(),juce::dontSendNotification);setGrid();}if(id==9)bottomMode=2;resized();}
+ bool keyPressed(const juce::KeyPress& key)override{if(key.getModifiers().isCommandDown()&&key.getKeyCode()=='S'){perform(saveProject);return true;}auto* focus=juce::Component::getCurrentlyFocusedComponent();for(auto* c=focus;c&&c!=this;c=c->getParentComponent())if(dynamic_cast<juce::TextEditor*>(c)||dynamic_cast<juce::ComboBox*>(c))return false;if(key.getModifiers().isCommandDown()){if(key.getKeyCode()=='Z'){perform(key.getModifiers().isShiftDown()?redoEdit:undoEdit);return true;}if(key.getKeyCode()=='Y'){perform(redoEdit);return true;}if(key.getKeyCode()=='S'){perform(saveProject);return true;}if(key.getKeyCode()=='O'){perform(openProject);return true;}if(key.getKeyCode()=='I'){perform(importFile);return true;}}if(key.getKeyCode()==juce::KeyPress::deleteKey){perform(removeClip);return true;}return false;}
+ bool isInterestedInFileDrag(const juce::StringArray& files)override{for(auto f:files)if(juce::File(f).hasFileExtension("wav;bwf;aif;aiff;flac"))return true;return false;}
+ void filesDropped(const juce::StringArray& files,int x,int y)override{action([this,files,x,y]{auto pos=timeline.getLocalPoint(this,juce::Point<int>{x,y});if(viewport.getBounds().contains(x,y)){timeline.cursor=timeline.at(float(pos.x));int row=pos.y/Timeline::rowHeight;timeline.selectedTrack=std::min(row,te::getAudioTracks(*session.edit).size());}for(auto& f:files)import(juce::File(f));});}
+ void timerCallback()override{syncRows();if(exportJob.active){try{juce::String result;if(exportJob.poll(result))status.setText(result=="cancelled"?zh("导出已取消；未生成目标文件"):zh("导出完成：")+result,juce::dontSendNotification);else status.setText(zh("后台导出：")+juce::String(int(exportJob.progress()*100))+"%",juce::dontSendNotification);}catch(const std::exception& e){status.setText(zh("导出失败：")+juce::String::fromUTF8(e.what()),juce::dontSendNotification);}}cancelExport.setEnabled(exportJob.active);if(++snapshotTicks<300)return;snapshotTicks=0;auto changed=session.edit->getTimeOfLastChange().toMilliseconds();if(session.edit->hasChangedSinceSaved()&&changed>lastSnapshot){action([this,changed]{session.checkpoint();lastSnapshot=changed;});}}
+ void resized()override{
+  const int w=getWidth(),h=getHeight(),left=showLeft?leftWidth:0,right=showRight?rightWidth:0;controlWidth=w<1400?420:480;int timelineX=left+controlWidth+4,clipX=w-right;const int top=144,head=66,bottom=bottomMode?146:29,workH=std::max(200,h-top-head-bottom);
+  menu.setBounds(0,0,w,25);for(int i=0;i<4;++i)modes[size_t(i)].setBounds(10+(i%2)*57,39+(i/2)*27,56,26);for(int i=0;i<3;++i)tools[size_t(i)].setBounds(141+i*49,38,48,33);buttons[5]->setVisible(true);buttons[6]->setVisible(true);buttons[5]->setBounds(141,78,71,24);buttons[6]->setBounds(215,78,71,24);zoom.setBounds(141,106,145,23);
+  counter.setBounds(304,36,230,88);for(int i=0;i<3;++i){auto* field=i==0?&start:i==1?&end:&cursor;field->setVisible(true);fieldLabels[size_t(i)].setVisible(true);fieldLabels[size_t(i)].setBounds(546,35+i*29,79,25);field->setBounds(628,35+i*29,110,25);}for(int i=0;i<5;++i)transport[size_t(i)].setBounds(756+i*38,40,36,37);gridSize.setBounds(970,40,98,27);snap.setBounds(970,77,98,25);buttons[1]->setVisible(true);buttons[1]->setBounds(756,88,90,27);buttons[13]->setVisible(true);buttons[13]->setBounds(852,88,90,27);
+  trackViewport.setBounds(left+2,top+head,controlWidth,workH);viewport.setBounds(timelineX,top+head,std::max(200,clipX-timelineX-4),workH);ruler.setBounds(timelineX,top,std::max(200,clipX-timelineX-4),head);strips.setSize(controlWidth,timeline.getHeight()+(viewport.getHorizontalScrollBar().isVisible()?viewport.getScrollBarThickness():0));for(int i=0;i<int(rows.size());++i)rows[size_t(i)]->setBounds(0,i*Timeline::rowHeight,controlWidth,Timeline::rowHeight);
+  navViewport.setVisible(showLeft);navViewport.setBounds(3,top+28,std::max(0,left-7),std::max(120,workH-120));nav.setSize(std::max(100,left-22),nav.getHeight());clipViewport.setVisible(showRight);clipViewport.setBounds(clipX+5,top+28,std::max(0,right-10),head+workH-31);clipList.setSize(std::max(100,right-26),clipList.getHeight());
+  int by=h-bottom;properties.setBounds(4,h-26,88,23);routing.setBounds(94,h-26,88,23);tasks.setBounds(184,h-26,62,23);status.setBounds(260,h-27,std::max(100,w-265),25);properties.setToggleState(bottomMode==1,juce::dontSendNotification);routing.setToggleState(bottomMode==3,juce::dontSendNotification);tasks.setToggleState(bottomMode==2,juce::dontSendNotification);
+  for(int i=3;i<10;++i)fieldLabels[size_t(i)].setVisible(false);for(auto* c:std::initializer_list<juce::Component*>{&gain,&fadeIn,&fadeOut,&trackDb,&trackPan,&masterDb,&sendDb,&mute,&solo,&preSend,&outputTrack,&applyMix,&busButton,&routeButton,&sendButton,&exportDepth,&cancelExport})c->setVisible(false);for(int i:{8,10,11,12,17,19})buttons[size_t(i)]->setVisible(false);
+  if(bottomMode==1){juce::TextEditor* f[]={&gain,&fadeIn,&fadeOut};for(int i=0;i<3;++i){fieldLabels[size_t(i+3)].setVisible(true);fieldLabels[size_t(i+3)].setBounds(15+i*155,by+12,140,21);f[i]->setVisible(true);f[i]->setBounds(15+i*155,by+37,140,27);}const int ids[]={10,11,12,17};for(int i=0;i<4;++i){buttons[size_t(ids[i])]->setVisible(true);buttons[size_t(ids[i])]->setBounds(490+i*145,by+36,138,29);}}
+  if(bottomMode==2){exportDepth.setVisible(true);cancelExport.setVisible(true);exportDepth.setBounds(16,by+34,155,29);cancelExport.setBounds(185,by+34,130,29);}
+  if(bottomMode==3){juce::TextEditor* f[]={&trackDb,&trackPan,&masterDb,&sendDb};for(int i=0;i<4;++i){fieldLabels[size_t(i+6)].setVisible(true);fieldLabels[size_t(i+6)].setBounds(15+i*115,by+8,110,20);f[i]->setVisible(true);f[i]->setBounds(15+i*115,by+30,106,26);}int x=480;for(auto* c:std::initializer_list<juce::Component*>{&mute,&solo,&preSend,&outputTrack,&applyMix,&routeButton,&sendButton}){c->setVisible(true);c->setBounds(x,by+30,c==&outputTrack?145:83,27);x+=c==&outputTrack?150:88;}}
+  ruler.scrollX=viewport.getViewPositionX();repaint();
+ }
+ void paint(juce::Graphics& g)override{
+  g.fillAll(EditStyle::bg);g.setColour(EditStyle::panel);g.fillRect(0,0,getWidth(),144);g.setColour(EditStyle::edge);for(int x:{129,294,540,748,958})g.drawVerticalLine(x,30,132);g.drawHorizontalLine(137,0,float(getWidth()));int left=showLeft?leftWidth:0,right=showRight?rightWidth:0;g.setColour(juce::Colour(0xff373c3f));g.fillRect(left+2,144,controlWidth,66);g.setColour(EditStyle::text);g.setFont(12);
+  if(showLeft){g.drawText(zh("轨道"),8,145,left-16,25,juce::Justification::left);int y=navViewport.getBottom()+8;g.setColour(EditStyle::panel);g.fillRect(3,y,left-6,24);g.setColour(EditStyle::text);g.drawText(zh("编组"),9,y,left-16,24,juce::Justification::left);g.setColour(EditStyle::muted);g.drawText(zh("无编组"),13,y+30,left-22,24,juce::Justification::left);}if(showRight){g.setColour(EditStyle::text);g.drawText(zh("片段"),getWidth()-right+10,145,right-16,25,juce::Justification::left);}
+  g.setColour(EditStyle::muted);g.setFont(11);g.drawText(zh("分秒 / 时间码 / 光标"),left+12,148,150,34,juce::Justification::left);g.drawText(zh("轨道"),left+12,187,135,21,juce::Justification::left);g.drawText(zh("插入 A–E"),left+166,187,100,21,juce::Justification::left);g.drawText(zh("发送"),left+282,187,85,21,juce::Justification::left);g.drawText("I/O",left+380,187,85,21,juce::Justification::left);
+  g.setColour(EditStyle::edge);if(showLeft)g.fillRect(left-1,144,3,getHeight()-174);if(showRight)g.fillRect(getWidth()-right-2,144,3,getHeight()-174);int by=getHeight()-(bottomMode?146:29);g.drawHorizontalLine(by,0,float(getWidth()));if(bottomMode==2){g.setColour(EditStyle::text);g.drawText(exportJob.active?zh("后台任务正在执行，进度见状态栏"):zh("当前没有运行中的导出任务"),335,by+35,600,27,juce::Justification::left);}
+ }
+ void mouseMove(const juce::MouseEvent& e)override{bool divider=(showLeft&&std::abs(e.x-leftWidth)<5)||(showRight&&std::abs(e.x-(getWidth()-rightWidth))<5);setMouseCursor(divider?juce::MouseCursor::LeftRightResizeCursor:juce::MouseCursor::NormalCursor);}
+ void mouseDown(const juce::MouseEvent& e)override{dragDivider=showLeft&&std::abs(e.x-leftWidth)<6?1:showRight&&std::abs(e.x-(getWidth()-rightWidth))<6?2:0;}
+ void mouseDrag(const juce::MouseEvent& e)override{if(dragDivider==1)leftWidth=std::clamp(e.x,130,260);if(dragDivider==2)rightWidth=std::clamp(getWidth()-e.x,145,320);if(dragDivider)resized();}
 };
