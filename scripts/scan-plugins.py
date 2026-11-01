@@ -48,12 +48,13 @@ def scan_batch(candidates, folder, command, timeout=20, verify_fixture=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('plugins', nargs='+', type=Path)
+    parser.add_argument('--verified', action='store_true', help='Use the independently linked current application')
     parser.add_argument('--timeout', type=float, default=20)
     parser.add_argument('--verify-studio-fixture', action='store_true', help='Only for the in-repository Studio Test Gain fixture')
     args = parser.parse_args()
     if not 0 < args.timeout <= 300:
         parser.error('timeout must be within (0, 300] seconds')
-    executable = ROOT / 'build/editor/StudioWorkbench_artefacts/Release/Studio Workbench.exe'
+    executable = ROOT / 'build/editor/StudioWorkbench_artefacts/Release' / ('Studio Workbench Verified.exe' if args.verified else 'Studio Workbench.exe')
     folder = ROOT / 'build/native-validation' / ('scan-' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
     records = scan_batch(args.plugins, folder, [str(executable)], args.timeout, args.verify_studio_fixture)
     (folder / 'worker-sha256.txt').write_text(hashlib.sha256(executable.read_bytes()).hexdigest())

@@ -7,10 +7,11 @@
 #include "stem_job.hpp"
 #include "../tests/export_cases.hpp"
 #include "editor.hpp"
+#include "../tests/plugin_ui_cases.hpp"
 class Window final:public juce::DocumentWindow {
     Session& owner;bool confirming=false;
 public:
-    Window(Session& s):DocumentWindow("Studio Workbench 0.1.1",juce::Colour(0xff171d26),allButtons),owner(s){
+    Window(Session& s):DocumentWindow("Studio Workbench 0.1.2",juce::Colour(0xff171d26),allButtons),owner(s){
         setUsingNativeTitleBar(true);setContentOwned(new MainPanel(s),true);setResizable(true,true);setResizeLimits(1240,850,4096,2160);centreWithSize(1360,900);setVisible(true);
     }
     void closeButtonPressed() override {
@@ -24,7 +25,7 @@ class App final:public juce::JUCEApplication {
 public:
     std::unique_ptr<Session> session;std::unique_ptr<Window> window;
     const juce::String getApplicationName() override{return "StudioWorkbenchValidation";}
-    const juce::String getApplicationVersion() override{return "0.1.1";}
+    const juce::String getApplicationVersion() override{return "0.1.2";}
     void initialise(const juce::String& line) override {
         auto args=juce::StringArray::fromTokens(line,false);int index=args.indexOf("--workspace");
         if(index<0 || index+1>=args.size() || !juce::File::isAbsolutePath(args[index+1])) {setApplicationReturnValue(2);quit();return;}
@@ -33,7 +34,8 @@ public:
         try {
             if(args.contains("--scan-plugin")){scanPlugin(root);quit();return;}
             session=std::make_unique<Session>(root);
-            if(args.contains("--ui-snapshot")){MainPanel panel(*session);panel.setSize(1360,900);auto shot=panel.createComponentSnapshot(panel.getLocalBounds());juce::PNGImageFormat png;auto stream=root.getChildFile("gui-preview.png").createOutputStream();require(stream&&png.writeImageToStream(shot,*stream),"GUI snapshot failed");quit();}
+            if(args.contains("--plugin-ui-test")){pluginUiTest(*session);quit();}
+            else if(args.contains("--ui-snapshot")){MainPanel panel(*session);panel.setSize(1360,900);auto shot=panel.createComponentSnapshot(panel.getLocalBounds());juce::PNGImageFormat png;auto stream=root.getChildFile("gui-preview.png").createOutputStream();require(stream&&png.writeImageToStream(shot,*stream),"GUI snapshot failed");quit();}
             else if(args.contains("--stem-worker")){stemWorker(*session);quit();}
             else if(args.contains("--render-worker")){renderWorker(*session);quit();}
             else if(args.contains("--self-test")) {offlineTest(*session);editorTest(*session);crossfadeTest(*session);mixerTest(*session);exportTest(*session);root.getChildFile("PASS.txt").replaceWithText("Offline signal and persistence passed; no audio devices opened.");quit();}

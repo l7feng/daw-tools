@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(StudioWorkbench VERSION 0.1.1 LANGUAGES CXX)
+project(StudioWorkbench VERSION 0.1.2 LANGUAGES CXX)
 if(MSVC)
   add_compile_options(/utf-8)
 endif()
@@ -30,8 +30,13 @@ if(STUDIO_BUILD_ENGINE)
   target_compile_features(StudioTestGain PRIVATE cxx_std_20)
   target_compile_definitions(StudioTestGain PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
   target_link_libraries(StudioTestGain PRIVATE juce::juce_audio_utils)
-  juce_add_gui_app(StudioWorkbench PRODUCT_NAME "Studio Workbench" VERSION 0.1.1)
+  juce_add_gui_app(StudioWorkbench PRODUCT_NAME "Studio Workbench" VERSION 0.1.2)
   juce_generate_juce_header(StudioWorkbench)
+  if(WIN32)
+    # Pinned JUCE's RC custom command omits its generated Info.txt dependency.
+    add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/StudioWorkbench_artefacts/JuceLibraryCode/StudioWorkbench_resources.rc"
+      APPEND DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/StudioWorkbench_artefacts/JuceLibraryCode/Info.txt")
+  endif()
   target_sources(StudioWorkbench PRIVATE src/workbench.cpp)
   set_property(SOURCE src/workbench.cpp PROPERTY OBJECT_DEPENDS
     "${CMAKE_SOURCE_DIR}/src/plugin_scan.hpp;${CMAKE_SOURCE_DIR}/src/export_job.hpp;${CMAKE_SOURCE_DIR}/src/session.hpp;${CMAKE_SOURCE_DIR}/src/editor.hpp;${CMAKE_SOURCE_DIR}/tests/offline_cases.hpp;${CMAKE_SOURCE_DIR}/tests/editor_cases.hpp;${CMAKE_SOURCE_DIR}/tests/mixer_cases.hpp;${CMAKE_SOURCE_DIR}/tests/export_cases.hpp")

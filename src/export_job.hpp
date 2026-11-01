@@ -5,7 +5,7 @@
 // Partial media stays in the job workspace and is never presented as a final export.
 class ExportJob {
     juce::ChildProcess process;
-    juce::File destination;
+    juce::File destination,staging;
     bool cancelled=false;RenderGuard guard;
 public:
     juce::File folder;
@@ -18,7 +18,8 @@ public:
         folder=session.root.getChildFile("export-"+juce::Uuid().toString());require(folder.createDirectory().wasOk(),"Cannot create export workspace");
         require(folder.getChildFile("studio-validation.marker").replaceWithText("isolated export"),"Cannot mark workspace");
         session.writeProject(folder.getChildFile("p.tracktionedit"),false,false);captureRenderInputs(session,folder);
-        auto request=std::make_unique<juce::DynamicObject>();request->setProperty("start",juce::int64(startSample));request->setProperty("end",juce::int64(endSample));request->setProperty("depth",depth);request->setProperty("timeoutMs",timeoutMs);
+        staging=target.getSiblingFile(target.getFileName()+"."+juce::Uuid().toString()+".partial");
+        auto request=std::make_unique<juce::DynamicObject>();request->setProperty("staging",staging.getFullPathName());request->setProperty("start",juce::int64(startSample));request->setProperty("end",juce::int64(endSample));request->setProperty("depth",depth);request->setProperty("timeoutMs",timeoutMs);
         require(folder.getChildFile("request.json").replaceWithText(juce::JSON::toString(juce::var(request.release()))),"Cannot write export request");
         destination=target;cancelled=false;
         juce::StringArray args{juce::File::getSpecialLocation(juce::File::currentExecutableFile).getFullPathName(),"--workspace",folder.getFullPathName(),"--render-worker"};
@@ -31,11 +32,8 @@ public:
         if(cancelled){renderJobStatus(folder,"cancelled");result="cancelled";return true;}
         try{guard.finished(process);guard.validate();
         require(process.getExitCode()==0&&folder.getChildFile("RENDER_DONE").existsAsFile(),"Render worker failed; inspect job FAIL.txt");
-        auto partial=folder.getChildFile("render.wav");require(partial.existsAsFile(),"Rendered file absent");
+        require(staging.existsAsFile(),"Rendered staging file absent");
         require(!destination.exists(),"Destination appeared during export; no overwrite");
-        // Copy to an unpredictable sibling first; final rename cannot replace a file on Windows.
-        auto staging=destination.getSiblingFile(destination.getFileName()+"."+juce::Uuid().toString()+".partial");
-        std::filesystem::copy_file(std::filesystem::path(partial.getFullPathName().toWideCharPointer()),std::filesystem::path(staging.getFullPathName().toWideCharPointer()));
         guard.validate();
         std::filesystem::rename(std::filesystem::path(staging.getFullPathName().toWideCharPointer()),std::filesystem::path(destination.getFullPathName().toWideCharPointer()));
         renderJobStatus(folder,"complete");result=destination.getFullPathName();return true;
@@ -44,7 +42,9 @@ public:
 };
 static void renderWorker(Session& session){
     auto request=juce::JSON::parse(session.root.getChildFile("request.json"));require(request.isObject(),"Invalid render request");
-    int timeout=int(request["timeoutMs"]);require(timeout>0&&timeout<=86400000,"Invalid worker timeout");static std::unique_ptr<RenderDeadline> deadline;deadline=std::make_unique<RenderDeadline>(session.root,timeout);loadRenderSnapshot(session);
+    int timeout=int(request["timeoutMs"]);require(timeout>0&&timeout<=86400000,"Invalid worker timeout");static std::unique_ptr<RenderDeadline> deadline;deadline=std::make_unique<RenderDeadline>(session.root,timeout);RenderInputWatch inputs;inputs.start(session.root);loadRenderSnapshot(session);
     session.render(session.root.getChildFile("render.wav"),256,juce::int64(request["end"]),int(request["depth"]),juce::int64(request["start"]));
-    validateRenderInputs(session.root);require(session.root.getChildFile("RENDER_DONE").replaceWithText("complete"),"Cannot write completion marker");
+    inputs.validate();validateRenderInputs(session.root);
+    auto staging=request["staging"].toString();if(staging.isNotEmpty()){renderJobStatus(session.root,"copying");copyRenderStaging(session.root.getChildFile("render.wav"),juce::File(staging));inputs.validate();validateRenderInputs(session.root);}
+    require(session.root.getChildFile("RENDER_DONE").replaceWithText("complete"),"Cannot write completion marker");
 }

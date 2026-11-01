@@ -40,3 +40,18 @@ target_sources(StudioTestTail PRIVATE tail_fixture.cpp)
 target_compile_features(StudioTestTail PRIVATE cxx_std_20)
 target_compile_definitions(StudioTestTail PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
 target_link_libraries(StudioTestTail PRIVATE juce::juce_audio_utils)
+
+foreach(fault IN ITEMS Crash Hang)
+ juce_add_plugin(StudioScan${fault} COMPANY_NAME "StudioWorkbench" PLUGIN_MANUFACTURER_CODE Stwb
+  PLUGIN_CODE Scft FORMATS VST3 PRODUCT_NAME "Studio Scan ${fault}" VERSION 0.1.0
+  IS_SYNTH FALSE COPY_PLUGIN_AFTER_BUILD FALSE VST3_AUTO_MANIFEST FALSE)
+ target_sources(StudioScan${fault} PRIVATE scan_fault_fixture.cpp)
+ target_compile_features(StudioScan${fault} PRIVATE cxx_std_20)
+ target_compile_definitions(StudioScan${fault} PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
+ if(fault STREQUAL "Crash")
+  target_compile_definitions(StudioScan${fault} PRIVATE STUDIO_SCAN_FAULT=1)
+ else()
+  target_compile_definitions(StudioScan${fault} PRIVATE STUDIO_SCAN_FAULT=2)
+ endif()
+ target_link_libraries(StudioScan${fault} PRIVATE juce::juce_audio_utils)
+endforeach()

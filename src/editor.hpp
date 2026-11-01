@@ -2,6 +2,7 @@
 #include <map>
 #include <array>
 inline juce::String zh(const char* text){return juce::String::fromUTF8(text);}
+#include "plugin_panel.hpp"
 class Timeline final:public juce::Component,private juce::ChangeListener {
 public:
     Session& session;
@@ -54,7 +55,7 @@ private:
 };
 class MainPanel final:public juce::Component,public juce::FileDragAndDropTarget,private juce::Timer {
 public:
-    enum Command {addTrack,importFile,saveProject,openProject,saveCopy,undoEdit,redoEdit,splitClip,copyClip,removeClip,moveClip,trimClip,envelope,exportWave,saveUserTemplate,openUserTemplate,relinkMedia,crossfadeClips,recovery};
+    enum Command {addTrack,importFile,saveProject,openProject,saveCopy,undoEdit,redoEdit,splitClip,copyClip,removeClip,moveClip,trimClip,envelope,exportWave,saveUserTemplate,openUserTemplate,relinkMedia,crossfadeClips,recovery,plugins};
     ExportJob exportJob;juce::TextButton cancelExport{zh("取消导出")};juce::ComboBox exportDepth;
     Session& session;Timeline timeline;juce::Viewport viewport;
     juce::Label title,status,help;
@@ -66,11 +67,11 @@ public:
     juce::TextButton applyMix{zh("应用混音")},busButton{zh("添加总线")},routeButton{zh("设置输出")},sendButton{zh("添加发送")};
     juce::Slider zoom;juce::ToggleButton snap{zh("吸附 10ms")};
     std::vector<std::unique_ptr<juce::TextButton>> buttons;
-    std::unique_ptr<juce::FileChooser> chooser;
+    std::unique_ptr<juce::FileChooser> chooser;std::unique_ptr<PluginsWindow> pluginWindow;
     explicit MainPanel(Session& s):session(s),timeline(s){
         setWantsKeyboardFocus(true);viewport.setViewedComponent(&timeline,false);addAndMakeVisible(viewport);
-        title.setText(zh("Studio Workbench · 编辑工作站 0.1.1"),juce::dontSendNotification);title.setFont(juce::FontOptions(23));addAndMakeVisible(title);addAndMakeVisible(status);addAndMakeVisible(help);
-        const std::pair<const char*,Command> specs[]={{"添加轨道",addTrack},{"导入音频",importFile},{"保存",saveProject},{"打开",openProject},{"另存为",saveCopy},{"撤销",undoEdit},{"重做",redoEdit},{"切分",splitClip},{"复制",copyClip},{"删除片段",removeClip},{"移动",moveClip},{"裁剪",trimClip},{"应用增益/淡化",envelope},{"导出 WAV",exportWave},{"保存自定模板",saveUserTemplate},{"从模板新建",openUserTemplate},{"重定位素材",relinkMedia},{"交叉淡化",crossfadeClips},{"保存恢复点",recovery}};
+        title.setText(zh("Studio Workbench · 编辑工作站 0.1.2"),juce::dontSendNotification);title.setFont(juce::FontOptions(23));addAndMakeVisible(title);addAndMakeVisible(status);addAndMakeVisible(help);
+        const std::pair<const char*,Command> specs[]={{"添加轨道",addTrack},{"导入音频",importFile},{"保存",saveProject},{"打开",openProject},{"另存为",saveCopy},{"撤销",undoEdit},{"重做",redoEdit},{"切分",splitClip},{"复制",copyClip},{"删除片段",removeClip},{"移动",moveClip},{"裁剪",trimClip},{"应用增益/淡化",envelope},{"导出 WAV",exportWave},{"保存自定模板",saveUserTemplate},{"从模板新建",openUserTemplate},{"重定位素材",relinkMedia},{"交叉淡化",crossfadeClips},{"保存恢复点",recovery},{"插件链",plugins}};
         for(auto [label,command]:specs){auto b=std::make_unique<juce::TextButton>(zh(label));b->setWantsKeyboardFocus(false);b->onClick=[this,command]{perform(command);};addAndMakeVisible(*b);buttons.push_back(std::move(b));}
         for(auto* field:{&start,&end,&cursor,&gain,&fadeIn,&fadeOut}){field->setInputRestrictions(18,"0123456789.-");addAndMakeVisible(field);}
         start.setText("0");end.setText("48000");cursor.setText("0");gain.setText("0");fadeIn.setText("0");fadeOut.setText("0");
@@ -118,15 +119,16 @@ public:
         chooser->launchAsync(mode|juce::FileBrowserComponent::canSelectFiles,[safe=juce::Component::SafePointer<MainPanel>(this),command](const juce::FileChooser& f){if(!safe)return;auto file=f.getResult();if(file==juce::File())return;safe->action([safe,file,command]{
             if(command==importFile)safe->import(file);
             if(command==saveUserTemplate)safe->session.saveTemplate(file.withFileExtension("swtemplate"));
-            if(command==openUserTemplate){require(!safe->session.edit->hasChangedSinceSaved(),"Save current project before template creation");safe->session.loadTemplate(file);safe->timeline.selected=-1;safe->timeline.selectedTrack=0;}
+            if(command==openUserTemplate){safe->pluginWindow.reset();require(!safe->session.edit->hasChangedSinceSaved(),"Save current project before template creation");safe->session.loadTemplate(file);safe->timeline.selected=-1;safe->timeline.selectedTrack=0;}
             if(command==relinkMedia){auto* audio=dynamic_cast<te::WaveAudioClip*>(safe->timeline.selection());require(audio!=nullptr,"Select an audio clip");safe->session.relink(*audio,file);}
             if(command==saveCopy)safe->session.saveAs(file.withFileExtension("tracktionedit"));
-            if(command==openProject){require(!safe->session.edit->hasChangedSinceSaved(),"Save the current project before opening another");safe->session.openProject(file);safe->timeline.selected=-1;safe->timeline.selectedTrack=0;}
+            if(command==openProject){safe->pluginWindow.reset();require(!safe->session.edit->hasChangedSinceSaved(),"Save the current project before opening another");safe->session.openProject(file);safe->timeline.selected=-1;safe->timeline.selectedTrack=0;}
             if(command==exportWave)safe->exportJob.start(safe->session,file.withFileExtension("wav"),safe->start.getText().getLargeIntValue(),safe->end.getText().getLargeIntValue(),safe->exportDepth.getSelectedId());
         });});
     }
     void import(const juce::File& f){int track=std::min(timeline.selectedTrack,te::getAudioTracks(*session.edit).size());auto* imported=session.importAudio(f,track,timeline.cursor);timeline.selected=session.clips().indexOf(imported);syncInspector();}
     void perform(Command command){
+        if(command==plugins){action([this]{pluginWindow=std::make_unique<PluginsWindow>(session,timeline.selectedTrack);});return;}
         if(command==importFile||command==openProject||command==saveCopy||command==exportWave||command==saveUserTemplate||command==openUserTemplate||command==relinkMedia){choose(command);return;}
         action([this,command]{
             if(command==addTrack){session.begin("Add track");session.addTrack();return;}

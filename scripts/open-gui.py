@@ -1,8 +1,9 @@
 """Launch the latest development GUI without opening an audio device."""
 from pathlib import Path
-import subprocess,os,uuid,ctypes
+import subprocess,os,uuid,ctypes,argparse
+parser=argparse.ArgumentParser();parser.add_argument('--verified',action='store_true');args=parser.parse_args()
 root=Path(__file__).resolve().parents[1]
-exe=root/'build/editor/StudioWorkbench_artefacts/Release/Studio Workbench.exe'
+exe=root/'build/editor/StudioWorkbench_artefacts/Release'/('Studio Workbench Verified.exe' if args.verified else 'Studio Workbench.exe')
 if not exe.is_file():
     ctypes.windll.user32.MessageBoxW(None,'请先构建 Studio Workbench。','Studio Workbench',16)
     raise SystemExit(1)

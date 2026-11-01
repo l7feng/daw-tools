@@ -1,4 +1,6 @@
 #include "../../src/session.hpp"
+#include "../../src/plugin_scan.hpp"
+#include "../../src/plugin_chain.hpp"
 #include "../offline_cases.hpp"
 #include "device_probe.hpp"
 #include "midi_engine.hpp"
@@ -9,6 +11,15 @@
 #include "stem_cases.hpp"
 #include "freeze_cases.hpp"
 #include "freeze_extended.hpp"
+#include "freeze_guard_cases.hpp"
+#include "pdc_extended.hpp"
+#include "plugin_workflow.hpp"
+#include "pdc_hosted.hpp"
+#include "routing_template.hpp"
+#include "project_faults.hpp"
+#include "stem_nonlinear.hpp"
+#include "midi_loop.hpp"
+#include "copy_watchdog.hpp"
 #include "../../src/stem_job.hpp"
 #include "../../src/export_job.hpp"
 #include "stem_job_cases.hpp"
@@ -70,6 +81,7 @@ static void testPdc(const juce::File& root){
   for(int c=0;c<2;++c)for(int i=0;i<48000;++i)error=std::max(error,std::abs(result.getSample(c,i)-2*reference.getSample(c,i)));
   require(error<=1e-6f,"Parallel PDC misalignment");++checks;
  }
+ effect->getAudioPluginInstance()->prepareToPlay(48000,128);
  require(effect->getAudioPluginInstance()->getLatencySamples()==257,"Fixture latency not reported");
  require(s.engine.getDeviceManager().deviceManager.getCurrentAudioDevice()==nullptr,"PDC opened device");
  dir.getChildFile("pdc-result.json").replaceWithText("{\"checks\":"+juce::String(checks)+",\"latency_samples\":257,\"max_error\":"+juce::String(error,9)+",\"device_opened\":false}");
@@ -78,7 +90,7 @@ class Probe:public juce::JUCEApplication{
 public:
  const juce::String getApplicationName()override{return "Studio Backend Probe";}
  const juce::String getApplicationVersion()override{return "0.1.0";}
- void initialise(const juce::String& command)override{auto workerArgs=juce::StringArray::fromTokens(command,true);int workerRoot=workerArgs.indexOf("--workspace");if((workerArgs.contains("--stem-worker")||workerArgs.contains("--render-worker"))&&workerRoot>=0&&workerRoot+1<workerArgs.size()){juce::File folder(workerArgs[workerRoot+1].unquoted());if(!folder.isAChildOf(juce::File(STUDIO_SOURCE_ROOT).getChildFile("build"))||!folder.getChildFile("studio-validation.marker").existsAsFile()){setApplicationReturnValue(2);quit();return;}try{Session session(folder);if(workerArgs.contains("--stem-worker"))stemWorker(session);else renderWorker(session);}catch(const std::exception& e){folder.getChildFile("FAIL.txt").replaceWithText(e.what());setApplicationReturnValue(1);}quit();return;}auto args=juce::StringArray::fromTokens(command,true);if(args.size()<2||args.size()>5){setApplicationReturnValue(2);quit();return;}juce::File root(args[0].unquoted()),fixture(args[1].unquoted());if(!root.isAChildOf(juce::File(STUDIO_SOURCE_ROOT).getChildFile("build"))||!root.getChildFile("studio-validation.marker").existsAsFile()){setApplicationReturnValue(2);quit();return;}try{if(args[1]=="--guard-wait"){juce::Thread::sleep(30000);}else if(args[1]=="--realtime")realtimeProbe(root,args.size()>=3?args[2].getIntValue():1,args.size()>=4?args[3].getIntValue():0);else if(args[1]=="--devices"||args[1]=="--capture")deviceProbe(root,args[1]=="--capture",args.size()>=3?args[2].getIntValue():256,args.size()>=4?args[3].getIntValue():5,args.size()==5?args[4].unquoted():"Windows Audio");else{testChain(root,fixture);testPdc(root);testMidiEngine(root);testMidiTransport(root);testPluginRecovery(root);testPluginRecovery(root,true);testTail(root);testStems(root);testFreeze(root);testExtendedFreeze(root);testStemJobs(root);testRenderGuards(root);}}catch(const std::exception& e){root.getChildFile("FAIL.txt").replaceWithText(e.what());setApplicationReturnValue(1);}quit();}
+ void initialise(const juce::String& command)override{auto workerArgs=juce::StringArray::fromTokens(command,true);int workerRoot=workerArgs.indexOf("--workspace");if((workerArgs.contains("--stem-worker")||workerArgs.contains("--render-worker")||workerArgs.contains("--scan-plugin")||workerArgs.contains("--project-save-worker")||workerArgs.contains("--copy-watchdog"))&&workerRoot>=0&&workerRoot+1<workerArgs.size()){juce::File folder(workerArgs[workerRoot+1].unquoted());if(!folder.isAChildOf(juce::File(STUDIO_SOURCE_ROOT).getChildFile("build"))||!folder.getChildFile("studio-validation.marker").existsAsFile()){setApplicationReturnValue(2);quit();return;}try{if(workerArgs.contains("--scan-plugin")){scanPlugin(folder);quit();return;}Session session(folder);if(workerArgs.contains("--copy-watchdog"))copyWatchdogWorker(session);else if(workerArgs.contains("--project-save-worker"))projectSaveWorker(session);else if(workerArgs.contains("--stem-worker"))stemWorker(session);else renderWorker(session);}catch(const std::exception& e){folder.getChildFile("FAIL.txt").replaceWithText(e.what());setApplicationReturnValue(1);}quit();return;}auto args=juce::StringArray::fromTokens(command,true);if(args.size()<2||args.size()>5){setApplicationReturnValue(2);quit();return;}juce::File root(args[0].unquoted()),fixture(args[1].unquoted());if(!root.isAChildOf(juce::File(STUDIO_SOURCE_ROOT).getChildFile("build"))||!root.getChildFile("studio-validation.marker").existsAsFile()){setApplicationReturnValue(2);quit();return;}try{if(args[1]=="--render-guards"){testChain(root,juce::File(STUDIO_SOURCE_ROOT).getChildFile("build/editor/StudioTestGain_artefacts/Release/VST3/Studio Test Gain.vst3"));testStemJobs(root);testRenderGuards(root);testCopyWatchdog(root);}else if(args[1]=="--stem-nonlinear"){testChain(root,juce::File(STUDIO_SOURCE_ROOT).getChildFile("build/editor/StudioTestGain_artefacts/Release/VST3/Studio Test Gain.vst3"));testNonlinearStems(root);}else if(args[1]=="--pdc-hosted"){testHostedPdc(root);testMidiLoop(root);}else if(args[1]=="--plugin-workflow"){testChain(root,juce::File(STUDIO_SOURCE_ROOT).getChildFile("build/editor/StudioTestGain_artefacts/Release/VST3/Studio Test Gain.vst3"));testPluginWorkflow(root);testRoutingTemplate(root);testProjectFaults(root);testNonlinearStems(root);}else if(args[1]=="--guard-wait"){juce::Thread::sleep(30000);}else if(args[1]=="--realtime")realtimeProbe(root,args.size()>=3?args[2].getIntValue():1,args.size()>=4?args[3].getIntValue():0);else if(args[1]=="--devices"||args[1]=="--capture")deviceProbe(root,args[1]=="--capture",args.size()>=3?args[2].getIntValue():256,args.size()>=4?args[3].getIntValue():5,args.size()==5?args[4].unquoted():"Windows Audio");else{testChain(root,fixture);testPdc(root);testExtendedPdc(root);testHostedPdc(root);testMidiLoop(root);testMidiEngine(root);testMidiTransport(root);testPluginRecovery(root);testPluginRecovery(root,true);testTail(root);testStems(root);testFreeze(root);testExtendedFreeze(root);testFreezeGuards(root);testStemJobs(root);testRenderGuards(root);testCopyWatchdog(root);testPluginWorkflow(root);testRoutingTemplate(root);testProjectFaults(root);testNonlinearStems(root);}}catch(const std::exception& e){root.getChildFile("FAIL.txt").replaceWithText(e.what());setApplicationReturnValue(1);}quit();}
  void shutdown()override{}
 };
 START_JUCE_APPLICATION(Probe)

@@ -11,9 +11,22 @@ public:
     juce::File getAppCacheFolder() override { return root.getChildFile("cache"); }
 private: juce::File root;
 };
+static juce::File pluginBundle(const juce::String& path){
+    if(!juce::File::isAbsolutePath(path))return {};
+    juce::File file(path);for(auto parent=file.getParentDirectory();parent!=parent.getParentDirectory();parent=parent.getParentDirectory())if(parent.hasFileExtension("vst3"))file=parent;return file;
+}
 class OfflineBehaviour final : public te::EngineBehaviour {
 public:
     bool autoInitialiseDeviceManager() override { return false; }
+    bool shouldLoadPlugin(te::ExternalPlugin& plugin) override {
+        // The upstream name fallback must never silently substitute another binary.
+        auto requested=pluginBundle(plugin.state.getProperty("filename").toString());
+        auto reject=[&]{plugin.desc.fileOrIdentifier=plugin.state.getProperty("filename").toString();plugin.desc.name=plugin.state.getProperty("name").toString();plugin.desc.manufacturerName=plugin.state.getProperty("manufacturer").toString();plugin.desc.uniqueId=plugin.state.getProperty("uniqueId").toString().getHexValue32();plugin.desc.deprecatedUid=plugin.state.getProperty("uid").toString().getHexValue32();return false;};
+        if(!requested.exists()||requested!=pluginBundle(plugin.desc.fileOrIdentifier))return reject();
+        if(plugin.state.getProperty("uniqueId").toString()!=juce::String::toHexString(plugin.desc.uniqueId)
+            ||plugin.state.getProperty("uid").toString()!=juce::String::toHexString(plugin.desc.deprecatedUid))return reject();
+        return te::EngineBehaviour::shouldLoadPlugin(plugin);
+    }
     ClipDefaults getClipDefaults() override {
         auto defaults=te::EngineBehaviour::getClipDefaults();
         // The direct WaveNodeRealTime path compensates Lagrange base latency.
@@ -25,10 +38,15 @@ public:
 class OfflineUI final : public te::UIBehaviour {
     juce::File progressFile;
 public:
+    std::function<bool(float)> cancelTask;
+    bool taskCancelled=false;
     explicit OfflineUI(juce::File root):progressFile(root.getChildFile("render-progress.txt")){}
     void runTaskWithProgressBar(te::ThreadPoolJobWithProgress& task) override {
         float last=-1;
-        while(task.runJob() != juce::ThreadPoolJob::jobHasFinished) {float now=task.getCurrentTaskProgress();if(now-last>=0.02f){progressFile.replaceWithText(juce::String(now,3));last=now;}}
+        for(;;) {
+            if(cancelTask&&cancelTask(task.getCurrentTaskProgress())){taskCancelled=true;task.signalJobShouldExit();}
+            if(task.runJob()==juce::ThreadPoolJob::jobHasFinished)break;
+            float now=task.getCurrentTaskProgress();if(now-last>=0.02f){progressFile.replaceWithText(juce::String(now,3));last=now;}}
         progressFile.replaceWithText("1");
     }
 };
@@ -61,10 +79,11 @@ public:
         t->setName("Track " + juce::String(te::getAudioTracks(*edit).size()));
         return t.get();
     }
-    void writeProject(const juce::File& target,bool allowReplace,bool updateCurrent=true) {
+    void writeProject(const juce::File& target,bool allowReplace,bool updateCurrent=true,std::function<bool()> cancelBeforeCommit={}) {
         require(!target.isDirectory()&&target.getParentDirectory().isDirectory(),"Invalid project destination");
         require(allowReplace||!target.exists(),"Project destination exists");
         auto staging=target.getSiblingFile(target.getFileName()+"."+juce::Uuid().toString()+".partial");
+        validateFrozenTracks();
         edit->state.setProperty("studioVersion","0.1.0",nullptr);
         edit->state.setProperty("studioProjectID",edit->getProjectItemID().toString(),nullptr);
         for(auto* track:te::getAudioTracks(*edit))if(track->isFrozen(te::Track::individualFreeze)){
@@ -75,6 +94,7 @@ public:
         }
         require(te::EditFileOperations(*edit).writeToFile(staging,false),"Project staging write failed");
         auto xml=juce::XmlDocument::parse(staging);require(xml&&xml->hasTagName("EDIT"),"Staged project validation failed");
+        require(!cancelBeforeCommit||!cancelBeforeCommit(),"Project save cancelled before commit; previous save retained");
         if(allowReplace&&target.existsAsFile())require(staging.replaceFileIn(target),"Project replacement failed; previous save retained");
         else std::filesystem::rename(std::filesystem::path(staging.getFullPathName().toWideCharPointer()),std::filesystem::path(target.getFullPathName().toWideCharPointer()));
         if(updateCurrent){projectFile=target;edit->editFileRetriever=[this]{return projectFile;};edit->resetChangedStatus();}
@@ -100,7 +120,7 @@ public:
         options.role=te::Edit::forRendering; options.numAudioTracks=0;
         options.editFileRetriever=[f]{return f;};
         auto next=std::make_unique<te::Edit>(options);
-        projectFile=f;edit=std::move(next);
+        validateFrozenEdit(*next);projectFile=f;edit=std::move(next);
     }
     void reopen() {openProject(projectFile);}
     void saveAs(const juce::File& f) {
@@ -177,7 +197,7 @@ public:
         begin("Relink media");clip.getSourceFileReference().setToDirectFileReference(replacement,false);
     }
     static void stripTemplateMedia(juce::ValueTree state) {
-        for(auto key:{"studioProjectID","studioFreezeAsset","studioFreezeHash","studioFreezeName"})state.removeProperty(key,nullptr);
+        for(auto key:{"studioProjectID","studioFreezeAsset","studioFreezeHash","studioFreezeName","studioFreezeIdentity"})state.removeProperty(key,nullptr);
         for(auto key:{"frozenIndividually","frozen"})if(state.hasProperty(key))state.setProperty(key,false,nullptr);
         for(int i=state.getNumChildren();--i>=0;){auto child=state.getChild(i);if(child.getType().toString().endsWith("CLIP")||child.getProperty("type").toString()=="freezePoint")state.removeChild(i,nullptr);else stripTemplateMedia(child);}
     }
@@ -244,32 +264,88 @@ public:
         auto* send=dynamic_cast<te::AuxSendPlugin*>(sendPlugin.get());require(send!=nullptr,"Send creation failed");
         begin("Add send");
         if(!ret){auto returnPlugin=edit->getPluginCache().createNewPlugin(te::AuxReturnPlugin::xmlTypeName,{});ret=dynamic_cast<te::AuxReturnPlugin*>(returnPlugin.get());require(ret!=nullptr,"Return creation failed");ret->busNumber=bus;target.pluginList.insertPlugin(returnPlugin,0,nullptr);}
+        target.setSoloIsolate(true); // Keep the selected source's return audible when soloing.
         send->busNumber=bus;send->setGainDb(db);
         auto index=source.pluginList.indexOf(source.getVolumePlugin());require(index>=0,"Fader missing");source.pluginList.insertPlugin(sendPlugin,index+(preFader?0:1),nullptr);
     }
-    void setTrackFrozen(int index,bool frozen) {
-        auto& track=trackAt(index);if(track.isFrozen(te::Track::individualFreeze)==frozen)return;
+    // Canonical state avoids differences in XML property insertion order after reopen.
+    static juce::String freezeState(juce::ValueTree state) {
+        juce::String result="<"+state.getType().toString()+">";juce::StringArray keys;
+        for(int i=0;i<state.getNumProperties();++i){auto key=state.getPropertyName(i).toString();
+            if(!key.startsWith("studioFreeze")&&key!="frozen"&&key!="frozenIndividually")keys.add(key);}
+        keys.sort(false);for(auto key:keys){auto value=state.getProperty(key).toString();
+            if(key=="filename"&&state.getProperty("type").toString()=="vst"&&juce::File::isAbsolutePath(value))value=pluginBundle(value).getFullPathName();
+            result+=juce::String(key.length())+":"+key+juce::String(value.length())+":"+value;}
+        for(auto child:state)if(child.getProperty("type").toString()!="freezePoint")result+=freezeState(child);
+        return result+"</>";
+    }
+    static juce::String freezeIdentity(te::Edit& owner,te::AudioTrack& track) {
+        juce::String text=freezeState(track.state);
+        for(auto type:{"TEMPOSEQUENCE","PITCHSEQUENCE"})text+=freezeState(owner.state.getChildWithName(type));
+        juce::Array<te::AudioTrack*> visited;
+        std::function<void(te::AudioTrack&)> inputs=[&](te::AudioTrack& t){if(visited.contains(&t))return;visited.add(&t);
+            if(&t!=&track)text+=freezeState(t.state);
+            for(auto* plugin:t.pluginList.getPluginsOfType<te::ExternalPlugin>()){
+                auto bundle=pluginBundle(plugin->state.getProperty("filename").toString());require(bundle.exists(),"Frozen plugin binary missing");juce::StringArray paths;
+                if(bundle.isDirectory()){for(auto file:bundle.findChildFiles(juce::File::findFiles,true))paths.add(file.getFullPathName());}else paths.add(bundle.getFullPathName());paths.sort(false);
+                for(auto path:paths)text+=path+juce::SHA256(juce::File(path)).toHexString();
+            }
+            for(auto* clip:t.getClips())if(auto* wave=dynamic_cast<te::WaveAudioClip*>(clip)){auto file=wave->getCurrentSourceFile();require(file.existsAsFile(),"Frozen source missing");text+=file.getFullPathName()+juce::SHA256(file).toHexString();}
+            for(auto* input:t.getInputTracks())if(auto* audio=dynamic_cast<te::AudioTrack*>(input))inputs(*audio);
+        };inputs(track);
+        return juce::SHA256(text.toRawUTF8(),size_t(text.getNumBytesAsUTF8())).toHexString();
+    }
+    static void validateFrozenEdit(te::Edit& owner) {
+        owner.flushState();
+        for(auto* track:te::getAudioTracks(owner))if(track->isFrozen(te::Track::individualFreeze)){
+            require(track->state.getProperty("studioFreezeIdentity").toString()==freezeIdentity(owner,*track),"Frozen inputs or parameters changed: unfreeze before saving or rendering");
+            auto file=te::TemporaryFileManager::getFreezeFileForTrack(*track);require(file.existsAsFile(),"Frozen cache missing");
+            auto hash=track->state.getProperty("studioFreezeHash").toString();
+            if(hash.isNotEmpty())require(juce::SHA256(file).toHexString()==hash,"Frozen cache changed");
+        }
+    }
+    void validateFrozenTracks(){validateFrozenEdit(*edit);}
+    void setTrackFrozen(int index,bool frozen,std::function<bool(float)> cancel={}) {
+        auto& track=trackAt(index);
+        if(track.isFrozen(te::Track::individualFreeze)==frozen){if(frozen)validateFrozenTracks();return;}
         if(frozen){require(track.getOutput().getDestinationTrack()==nullptr,"Freeze the destination bus instead");
             require(track.pluginList.getPluginsOfType<te::AuxSendPlugin>().isEmpty(),"Freeze with sends is not supported yet");
+            require(track.getInputTracks().isEmpty()&&track.pluginList.getPluginsOfType<te::AuxReturnPlugin>().isEmpty(),"Bus and auxiliary return freezing is not supported yet");
             require(std::abs(engine.getDeviceManager().getSampleRate()-48000)<0.01&&engine.getDeviceManager().getBlockSize()>0,"Configure the engine clock before freezing");
             for(auto* plugin:track.pluginList.getPluginsOfType<te::ExternalPlugin>()){plugin->initialiseFully();require(plugin->getAudioPluginInstance()!=nullptr,"Cannot freeze unavailable plugin");}
         }
-        track.setFrozen(frozen,te::Track::individualFreeze);
-        auto deadline=juce::Time::getMillisecondCounterHiRes()+10000;
-        while(juce::Time::getMillisecondCounterHiRes()<deadline){juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
-            if(track.isFrozen(te::Track::individualFreeze)==frozen&&(!frozen||te::TemporaryFileManager::getFreezeFileForTrack(track).existsAsFile()))return;}
-        throw std::runtime_error("Freeze/unfreeze did not complete");
+        edit->flushState();auto previous=edit->state.createCopy();auto id=edit->getProjectItemID();bool wasDirty=edit->hasChangedSinceSaved();
+        auto& ui=dynamic_cast<OfflineUI&>(engine.getUIBehaviour());ui.taskCancelled=false;ui.cancelTask=std::move(cancel);
+        try{
+            track.setFrozen(frozen,te::Track::individualFreeze);
+            auto deadline=juce::Time::getMillisecondCounterHiRes()+10000;
+            while(juce::Time::getMillisecondCounterHiRes()<deadline){juce::MessageManager::getInstance()->runDispatchLoopUntil(10);
+                if(ui.taskCancelled)throw std::runtime_error("Freeze cancelled; original edit restored");
+                if(track.isFrozen(te::Track::individualFreeze)==frozen&&(!frozen||te::TemporaryFileManager::getFreezeFileForTrack(track).existsAsFile())){
+                    ui.cancelTask={};
+                    for(auto key:{"studioFreezeIdentity","studioFreezeAsset","studioFreezeHash","studioFreezeName"})track.state.removeProperty(key,nullptr);
+                    if(frozen){auto file=te::TemporaryFileManager::getFreezeFileForTrack(track);std::unique_ptr<juce::AudioFormatReader> reader(engine.getAudioFileFormatManager().getFrozenFileFormat()->createReaderFor(file.createInputStream().release(),true));require(reader&&reader->lengthInSamples>0,"Freeze produced invalid audio");track.state.setProperty("studioFreezeHash",juce::SHA256(file).toHexString(),nullptr);edit->flushState();track.state.setProperty("studioFreezeIdentity",freezeIdentity(*edit,track),nullptr);}
+                    return;
+                }
+            }
+            throw std::runtime_error("Freeze/unfreeze did not complete");
+        }catch(...){
+            ui.cancelTask={};te::Edit::Options options{engine,previous,id};options.role=te::Edit::forRendering;options.numAudioTracks=0;options.editFileRetriever=[this]{return projectFile;};
+            auto restored=std::make_unique<te::Edit>(options);edit=std::move(restored);if(!wasDirty)edit->resetChangedStatus();else edit->markAsChanged();throw;
+        }
     }
     void undo(){edit->undo();edit->getUndoManager().beginNewTransaction();}
     void redo(){edit->redo();edit->getUndoManager().beginNewTransaction();}
     void render(const juce::File& output, int blockSize=128, int64_t endSample=48000, int bitDepth=32, int64_t startSample=0, int selectedTrack=-1, bool includeMaster=true) {
-        require(!output.exists(),"output already exists");
+        require(!output.exists(),"output already exists");validateFrozenTracks();
         for(auto* track:te::getAudioTracks(*edit))for(auto* plugin:track->pluginList.getPluginsOfType<te::ExternalPlugin>()){plugin->initialiseFully();require(plugin->getAudioPluginInstance()!=nullptr,"Cannot export: unavailable external plugin");}
         for(auto* plugin:edit->getMasterPluginList().getPluginsOfType<te::ExternalPlugin>()){plugin->initialiseFully();require(plugin->getAudioPluginInstance()!=nullptr,"Cannot export: unavailable master plugin");}
-        std::unique_ptr<te::Edit> stemEdit;
+        // Each offline render uses fresh processor instances and latency metadata.
+        edit->flushState();te::Edit::Options renderOptions{engine,edit->state.createCopy(),edit->getProjectItemID()};renderOptions.role=te::Edit::forRendering;renderOptions.numAudioTracks=0;renderOptions.editFileRetriever=[this]{return projectFile;};
+        auto stemEdit=std::make_unique<te::Edit>(renderOptions);
         if(selectedTrack>=0){auto& target=trackAt(selectedTrack);juce::Array<int> included;auto originals=te::getAudioTracks(*edit);
             for(int i=0;i<originals.size();++i){juce::Array<te::AudioTrack*> forward,backward;if(reaches(target,*originals[i],forward)||reaches(*originals[i],target,backward))included.add(i);}
-            te::Edit::Options options{engine,edit->state.createCopy(),te::ProjectItemID::createNewID(0)};options.role=te::Edit::forRendering;options.numAudioTracks=0;options.editFileRetriever=[this]{return projectFile;};stemEdit=std::make_unique<te::Edit>(options);
+
             auto copies=te::getAudioTracks(*stemEdit);for(int i=0;i<copies.size();++i)if(!included.contains(i)){copies[i]->setMute(true);copies[i]->setSolo(false);}
             if(bool(target.state.getProperty("studioBus")))for(int i=0;i<copies.size();++i)if(i!=selectedTrack&&copies[i]->getOutput().getDestinationTrack()==nullptr){
                 juce::Array<te::AudioTrack*> downstream;if(reaches(target,*originals[i],downstream))continue;

@@ -2,6 +2,8 @@
 #include <thread>
 #include <condition_variable>
 #include <chrono>
+#include "input_watch.hpp"
+#include "staging_copy.hpp"
 static void renderJobStatus(const juce::File& folder,const juce::String& status,const juce::String& error={}){
  auto* object=new juce::DynamicObject;object->setProperty("status",status);if(error.isNotEmpty())object->setProperty("error",error);folder.getChildFile("job-status.json").replaceWithText(juce::JSON::toString(juce::var(object)));
 }
@@ -28,11 +30,11 @@ public:
  ~RenderDeadline(){{std::lock_guard<std::mutex> lock(mutex);finished=true;}cv.notify_one();thread.join();}
 };
 class RenderGuard {
- double deadline=0;juce::File folder;bool timedOut=false;
+ double deadline=0;juce::File folder;bool timedOut=false;RenderInputWatch inputWatch;
 public:
  juce::String failureStatus="failed";
- void start(const juce::File& f,int timeoutMs){require(timeoutMs>0&&timeoutMs<=86400000,"Invalid render timeout");folder=f;deadline=juce::Time::getMillisecondCounterHiRes()+timeoutMs;timedOut=false;failureStatus="failed";renderJobStatus(folder,"running");}
+ void start(const juce::File& f,int timeoutMs){require(timeoutMs>0&&timeoutMs<=86400000,"Invalid render timeout");folder=f;deadline=juce::Time::getMillisecondCounterHiRes()+timeoutMs;timedOut=false;failureStatus="failed";inputWatch.start(folder);renderJobStatus(folder,"running");}
  void enforce(juce::ChildProcess& process){if(process.isRunning()&&juce::Time::getMillisecondCounterHiRes()>=deadline){timedOut=true;if(!process.kill()&&process.isRunning()){failureStatus="timed_out";renderJobStatus(folder,"timed_out","Cannot terminate renderer; retry required");throw std::runtime_error("Cannot terminate timed-out renderer");}}}
  void finished(juce::ChildProcess& process){if(timedOut||process.getExitCode()==124||folder.getChildFile("TIMEOUT").existsAsFile()){failureStatus="timed_out";throw std::runtime_error("Render task timed out; no delivery committed");}}
- void validate(){try{validateRenderInputs(folder);}catch(...){failureStatus="input_changed";throw;}}
+ void validate(){try{inputWatch.validate();validateRenderInputs(folder);}catch(...){failureStatus="input_changed";throw;}}
 };
