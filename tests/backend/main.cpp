@@ -12,6 +12,33 @@ static void testChain(const juce::File& root,const juce::File& fixture){
  verify("inserted",0.5f,128);external->setEnabled(false);verify("bypass",1,256);external->setEnabled(true);
  external->getAudioPluginInstance()->getParameters()[0]->setValueNotifyingHost(0.25f);external->flushPluginStateToValueTree();verify("parameter",0.25f,128);s.save();plugin=nullptr;s.reopen();verify("reopened",0.25f,256);
  auto* restored=s.trackAt(0).pluginList.findFirstPluginOfType<te::ExternalPlugin>();require(restored!=nullptr,"Plugin missing after reopen");restored->deleteFromParent();verify("removed",1,128);
+ // N05/N07: identical plugin types must retain independent instance state.
+ auto addGain=[&](float value){
+  auto item=s.edit->getPluginCache().createNewPlugin(te::ExternalPlugin::xmlTypeName,*types[0]);
+  auto* effect=dynamic_cast<te::ExternalPlugin*>(item.get());
+  require(effect!=nullptr,"Second chain creation failed");
+  s.trackAt(0).pluginList.insertPlugin(item,0,nullptr);effect->initialiseFully();
+  require(effect->getAudioPluginInstance()!=nullptr,"Second chain load failed");
+  effect->getAudioPluginInstance()->getParameters()[0]->setValueNotifyingHost(value);
+  effect->flushPluginStateToValueTree();return effect;
+ };
+ auto* first=addGain(0.25f);auto* second=addGain(0.5f);
+ verify("two_instances",0.125f,128);
+ second->getAudioPluginInstance()->getParameters()[0]->setValueNotifyingHost(0.75f);
+ second->flushPluginStateToValueTree();
+ require(std::abs(first->getAudioPluginInstance()->getParameters()[0]->getValue()-0.25f)<1e-7f,"Instance parameters leaked");
+ verify("independent_parameters",0.1875f,256);
+ s.save();s.reopen();
+ verify("two_instances_reopened",0.1875f,128);
+ juce::Array<te::ExternalPlugin*> chain;
+ for(auto* item:s.trackAt(0).pluginList)if(auto* effect=dynamic_cast<te::ExternalPlugin*>(item))chain.add(effect);
+ require(chain.size()==2,"Restored instance count differs");
+ require(std::abs(chain[0]->getAudioPluginInstance()->getParameters()[0]->getValue()-0.75f)<1e-7f&&std::abs(chain[1]->getAudioPluginInstance()->getParameters()[0]->getValue()-0.25f)<1e-7f,"Restored per-instance state or order differs");
+ chain[0]->setEnabled(false);verify("one_instance_bypassed",0.25f,256);
+ s.save();s.reopen();verify("bypass_reopened",0.25f,128);
+ auto* bypassed=s.trackAt(0).pluginList.findFirstPluginOfType<te::ExternalPlugin>();
+ require(bypassed!=nullptr&&!bypassed->isEnabled(),"Bypass state lost");
+ bypassed->deleteFromParent();verify("one_instance_removed",0.25f,256);
  require(s.engine.getDeviceManager().deviceManager.getCurrentAudioDevice()==nullptr,"Audio device opened");
  root.getChildFile("backend-result.json").replaceWithText("{\"checks\":"+juce::String(checks)+",\"max_error\":"+juce::String(maxError,9)+",\"initial_inputs\":"+juce::String(initialInputs)+",\"initial_outputs\":"+juce::String(initialOutputs)+",\"device_opened\":false}");
 }
