@@ -70,3 +70,11 @@ GUI调整为顶部两行操作、主时间线、右侧带可见标签的片段/�
 运行`scripts/build-backend.cmd`后，可用`python scripts/run-device.py --capture --driver asio --block 256 --seconds 15`测试已安装Yamaha Steinberg USB ASIO。shared/lowlatency用于UR22C明确Input 1/2和DAW端点。输出数字静音，实际输入会录入独立运行目录；不打开控制面板、不切换默认设备。
 
 报告必须区分请求/实际缓冲、启动/测量窗口、FIFO丢块和驱动过载计数；计数不可用时stable为null。2026-11-01 ASIO请求128/256实际均512，不能称128/256通过。exit0仅说明本探针已执行断言通过，不能替代真实声音、实时引擎、长时稳定性或业务验收。独立异常退出测试入口为scripts/test-capture-recovery.py，只终止它自己创建的采集子进程并保留原始WAV。
+
+## 后端冻结与工程资产
+
+`Session::setTrackFrozen(index, true/false)`接引擎原生单轨冻结；目前要求48kHz引擎时钟已配置，测试使用Hosted软件时钟，不打开声卡。暂拒绝直接输出到其他轨道的源轨及带Aux Send轨，尚未接GUI操作。
+
+保存冻结工程会生成同目录的`<工程文件名>.assets/freeze/`，包含按SHA256命名的冻结音频。打开前验证资产散列并恢复引擎缓存；移动工程时须一起保留这个.assets目录。恢复点也有自己的对应.assets目录；解冻保留已保存资产，未提供自动清理。用户模板清除原工程ID、冻结标记和缓存引用。
+
+独立运行目录中的新Engine恢复已验证；跨机器、异常掉电、缺失资产修复和所有路由/插件冻结尚未验收。默认GUI程序仍可能是旧构建，后端回归使用独立Verified程序，不推定正在运行的GUI热更新。

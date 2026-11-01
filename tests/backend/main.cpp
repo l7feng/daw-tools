@@ -7,6 +7,7 @@
 #include "plugin_recovery.hpp"
 #include "tail_cases.hpp"
 #include "stem_cases.hpp"
+#include "freeze_cases.hpp"
 static void testChain(const juce::File& root,const juce::File& fixture){
  Session s(root);juce::VST3PluginFormat format;juce::OwnedArray<juce::PluginDescription> types;format.findAllTypesForFile(types,fixture.getFullPathName());require(types.size()==1&&types[0]->name=="Studio Test Gain","Fixture scan failed");
  auto source=root.getChildFile("source.wav");juce::AudioBuffer<float> audio(2,48000);audio.clear();audio.setSample(0,12000,0.001f);audio.setSample(1,24000,-0.002f);juce::WavAudioFormat wav;std::unique_ptr<juce::AudioFormatWriter> writer(wav.createWriterFor(source.createOutputStream().release(),48000,2,32,{},0));require(writer&&writer->writeFromAudioSampleBuffer(audio,0,48000),"Source write failed");writer.reset();s.importAudio(source,0,0);
@@ -72,7 +73,7 @@ class Probe:public juce::JUCEApplication{
 public:
  const juce::String getApplicationName()override{return "Studio Backend Probe";}
  const juce::String getApplicationVersion()override{return "0.1.0";}
- void initialise(const juce::String& command)override{auto args=juce::StringArray::fromTokens(command,true);if(args.size()<2||args.size()>5){setApplicationReturnValue(2);quit();return;}juce::File root(args[0].unquoted()),fixture(args[1].unquoted());if(!root.isAChildOf(juce::File(STUDIO_SOURCE_ROOT).getChildFile("build"))||!root.getChildFile("studio-validation.marker").existsAsFile()){setApplicationReturnValue(2);quit();return;}try{if(args[1]=="--realtime")realtimeProbe(root,args.size()>=3?args[2].getIntValue():1,args.size()>=4?args[3].getIntValue():0);else if(args[1]=="--devices"||args[1]=="--capture")deviceProbe(root,args[1]=="--capture",args.size()>=3?args[2].getIntValue():256,args.size()>=4?args[3].getIntValue():5,args.size()==5?args[4].unquoted():"Windows Audio");else{testChain(root,fixture);testPdc(root);testMidiEngine(root);testMidiTransport(root);testPluginRecovery(root);testPluginRecovery(root,true);testTail(root);testStems(root);}}catch(const std::exception& e){root.getChildFile("FAIL.txt").replaceWithText(e.what());setApplicationReturnValue(1);}quit();}
+ void initialise(const juce::String& command)override{auto args=juce::StringArray::fromTokens(command,true);if(args.size()<2||args.size()>5){setApplicationReturnValue(2);quit();return;}juce::File root(args[0].unquoted()),fixture(args[1].unquoted());if(!root.isAChildOf(juce::File(STUDIO_SOURCE_ROOT).getChildFile("build"))||!root.getChildFile("studio-validation.marker").existsAsFile()){setApplicationReturnValue(2);quit();return;}try{if(args[1]=="--realtime")realtimeProbe(root,args.size()>=3?args[2].getIntValue():1,args.size()>=4?args[3].getIntValue():0);else if(args[1]=="--devices"||args[1]=="--capture")deviceProbe(root,args[1]=="--capture",args.size()>=3?args[2].getIntValue():256,args.size()>=4?args[3].getIntValue():5,args.size()==5?args[4].unquoted():"Windows Audio");else{testChain(root,fixture);testPdc(root);testMidiEngine(root);testMidiTransport(root);testPluginRecovery(root);testPluginRecovery(root,true);testTail(root);testStems(root);testFreeze(root);}}catch(const std::exception& e){root.getChildFile("FAIL.txt").replaceWithText(e.what());setApplicationReturnValue(1);}quit();}
  void shutdown()override{}
 };
 START_JUCE_APPLICATION(Probe)
