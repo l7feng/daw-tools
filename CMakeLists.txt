@@ -23,6 +23,13 @@ if(STUDIO_BUILD_ENGINE)
   set_property(TARGET TestRunner PROPERTY SOURCES "${runner_sources}")
   target_sources(TestRunner PRIVATE tests/isolated_main.cpp)
   target_include_directories(TestRunner PRIVATE "${CMAKE_SOURCE_DIR}/build/generated")
+  juce_add_plugin(StudioTestGain COMPANY_NAME "StudioWorkbench" PLUGIN_MANUFACTURER_CODE Stwb
+    PLUGIN_CODE Stgn FORMATS VST3 PRODUCT_NAME "Studio Test Gain" VERSION 0.1.0
+    IS_SYNTH FALSE NEEDS_MIDI_INPUT FALSE NEEDS_MIDI_OUTPUT FALSE COPY_PLUGIN_AFTER_BUILD FALSE)
+  target_sources(StudioTestGain PRIVATE tests/gain_fixture.cpp)
+  target_compile_features(StudioTestGain PRIVATE cxx_std_20)
+  target_compile_definitions(StudioTestGain PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
+  target_link_libraries(StudioTestGain PRIVATE juce::juce_audio_utils)
   juce_add_gui_app(StudioWorkbench PRODUCT_NAME "Studio Workbench" VERSION 0.1.0)
   juce_generate_juce_header(StudioWorkbench)
   target_sources(StudioWorkbench PRIVATE src/workbench.cpp)

@@ -4,7 +4,7 @@ import argparse, datetime, hashlib, json, os, subprocess, uuid
 import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 
-def scan_batch(candidates, folder, command, timeout=20):
+def scan_batch(candidates, folder, command, timeout=20, verify_fixture=False):
     folder.mkdir(parents=True, exist_ok=False)
     records = []
     seen = set()
@@ -17,7 +17,7 @@ def scan_batch(candidates, folder, command, timeout=20):
         job = folder / str(len(records))
         job.mkdir()
         (job / 'studio-validation.marker').write_text('isolated plugin scan')
-        (job / 'scan-request.json').write_text(json.dumps({'path': str(path)}), encoding='utf-8')
+        (job / 'scan-request.json').write_text(json.dumps({'path': str(path), 'verifyStudioFixture': verify_fixture}), encoding='utf-8')
         (job / 'temp').mkdir()
         env = dict(os.environ, TEMP=str(job / 'temp'), TMP=str(job / 'temp'))
         record = {'path': str(path), 'job': str(job), 'status': 'failed'}
@@ -49,12 +49,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('plugins', nargs='+', type=Path)
     parser.add_argument('--timeout', type=float, default=20)
+    parser.add_argument('--verify-studio-fixture', action='store_true', help='Only for the in-repository Studio Test Gain fixture')
     args = parser.parse_args()
     if not 0 < args.timeout <= 300:
         parser.error('timeout must be within (0, 300] seconds')
     executable = ROOT / 'build/editor/StudioWorkbench_artefacts/Release/Studio Workbench.exe'
     folder = ROOT / 'build/native-validation' / ('scan-' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
-    records = scan_batch(args.plugins, folder, [str(executable)], args.timeout)
+    records = scan_batch(args.plugins, folder, [str(executable)], args.timeout, args.verify_studio_fixture)
     (folder / 'worker-sha256.txt').write_text(hashlib.sha256(executable.read_bytes()).hexdigest())
     print(folder / 'report.json')
     return 0 if all(item['status'] == 'ok' for item in records) else 1

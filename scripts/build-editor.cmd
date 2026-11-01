@@ -12,7 +12,7 @@ if errorlevel 1 exit /b 1
 
 if errorlevel 1 exit /b 1
 
-"D:\Ai-Files\Tools\BuildEnv\vs2022-cpp\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" --build build/editor --target StudioWorkbench -j 4
+"D:\Ai-Files\Tools\BuildEnv\vs2022-cpp\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" --build build/editor --target StudioWorkbench StudioTestGain_VST3 -j 4
 
 
 exit /b %errorlevel%

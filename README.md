@@ -48,3 +48,13 @@ D:\Ai-Files\Tools\BuildEnv\py312\python.exe -X utf8 scripts/run-workbench.py --e
 `python scripts/scan-plugins.py <明确指定的插件.vst3> [其他候选] --timeout 20`
 
 每个候选使用独立子进程；不搜索系统插件目录，不创建音频Session或设备管理器。重复路径去重；异常退出、超时、坏报告分别留证，每项完成后保存report.json，后续候选继续。结果在build/native-validation/scan-*。监督程序的故障注入测试用`python tests/test_scan_supervisor.py`运行，它验证进程控制，不代表真实插件通过。当前仅验证原生扫描器拒绝无效/缺失文件；正常VST3样本、GUI插件列表和实际插件链尚待接入。第三方插件自身的外部副作用并不由进程隔离自动限制。
+
+## 确定性VST3样本
+
+构建入口同时生成StudioTestGain_VST3，路径为`build/editor/StudioTestGain_artefacts/Release/VST3/Studio Test Gain.vst3`；不自动复制到系统插件目录。测试处理器由本项目编写，只实现0..1线性增益与版本化状态；框架许可仍沿用锁定JUCE，不表示已批准对外分发。
+
+```powershell
+python scripts/scan-plugins.py "build/editor/StudioTestGain_artefacts/Release/VST3/Studio Test Gain.vst3" --verify-studio-fixture --timeout 30
+```
+
+此开关只用于本项目的Studio Test Gain样本，验证默认0.5增益、0.25参数改变及新实例状态恢复，48kHz、128/256采样块、误差阈值1e-7，不创建音频设备。它验证JUCE VST3实例通路，不代表Tracktion工程插件链/PDC/GUI编辑器已经通过。当前扫描描述的通道数为0，实际双声道处理通过；宿主路由必须后续核实实际bus配置，不能仅依赖该字段。
