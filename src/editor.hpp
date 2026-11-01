@@ -1,5 +1,6 @@
 #pragma once
 #include <map>
+#include <array>
 inline juce::String zh(const char* text){return juce::String::fromUTF8(text);}
 class Timeline final:public juce::Component,private juce::ChangeListener {
 public:
@@ -20,7 +21,8 @@ public:
     juce::Rectangle<int> bounds(te::Clip& c,int row)const {auto p=c.getPosition();return {x(Session::samples(p.getStart())),44+row*90,std::max(3,x(Session::samples(p.getEnd()))-x(Session::samples(p.getStart()))),72};}
     void paint(juce::Graphics& g)override {
         g.fillAll(juce::Colour(0xff151b24));auto area=g.getClipBounds();
-        auto step=std::max(1.0/48000.0,std::pow(10.0,std::floor(std::log10(90.0/scale))));
+        auto base=std::pow(10.0,std::floor(std::log10(100.0/scale)));auto ratio=100.0/scale/base;
+        auto step=std::max(1.0/48000.0,base*(ratio<=1?1:ratio<=2?2:ratio<=5?5:10));
         for(double t=std::max(0.0,std::floor((area.getX()-160)/scale/step)*step);160+t*scale<area.getRight();t+=step){int px=160+int(t*scale);g.setColour(juce::Colour(0xff344151));g.drawVerticalLine(px,30,float(getHeight()));g.setColour(juce::Colours::lightgrey);g.drawText(juce::String(t,step<0.001?5:3),px+3,4,85,22,juce::Justification::left);}
         auto tracks=te::getAudioTracks(*session.edit);int index=0;
         for(int row=0;row<tracks.size();++row){g.setColour(row==selectedTrack?juce::Colour(0xff35465a):juce::Colour(0xff232d39));g.fillRect(0,40+row*90,158,88);g.setColour(juce::Colours::white);g.drawText(tracks[row]->getName(),12,48+row*90,140,26,juce::Justification::left);
@@ -56,6 +58,7 @@ public:
     ExportJob exportJob;juce::TextButton cancelExport{zh("取消导出")};juce::ComboBox exportDepth;
     Session& session;Timeline timeline;juce::Viewport viewport;
     juce::Label title,status,help;
+    std::array<juce::Label,10> fieldLabels;juce::Label clipHeading,mixHeading;
     juce::TextEditor start,end,cursor,gain,fadeIn,fadeOut;
     juce::TextEditor trackDb,trackPan,masterDb,sendDb;
     juce::ToggleButton mute{zh("静音")},solo{zh("独奏")},preSend{zh("推子前发送")};
@@ -66,7 +69,7 @@ public:
     std::unique_ptr<juce::FileChooser> chooser;
     explicit MainPanel(Session& s):session(s),timeline(s){
         setWantsKeyboardFocus(true);viewport.setViewedComponent(&timeline,false);addAndMakeVisible(viewport);
-        title.setText(zh("Studio Workbench · 编辑工作站 0.1.0"),juce::dontSendNotification);title.setFont(juce::FontOptions(23));addAndMakeVisible(title);addAndMakeVisible(status);addAndMakeVisible(help);
+        title.setText(zh("Studio Workbench · 编辑工作站 0.1.1"),juce::dontSendNotification);title.setFont(juce::FontOptions(23));addAndMakeVisible(title);addAndMakeVisible(status);addAndMakeVisible(help);
         const std::pair<const char*,Command> specs[]={{"添加轨道",addTrack},{"导入音频",importFile},{"保存",saveProject},{"打开",openProject},{"另存为",saveCopy},{"撤销",undoEdit},{"重做",redoEdit},{"切分",splitClip},{"复制",copyClip},{"删除片段",removeClip},{"移动",moveClip},{"裁剪",trimClip},{"应用增益/淡化",envelope},{"导出 WAV",exportWave},{"保存自定模板",saveUserTemplate},{"从模板新建",openUserTemplate},{"重定位素材",relinkMedia},{"交叉淡化",crossfadeClips},{"保存恢复点",recovery}};
         for(auto [label,command]:specs){auto b=std::make_unique<juce::TextButton>(zh(label));b->setWantsKeyboardFocus(false);b->onClick=[this,command]{perform(command);};addAndMakeVisible(*b);buttons.push_back(std::move(b));}
         for(auto* field:{&start,&end,&cursor,&gain,&fadeIn,&fadeOut}){field->setInputRestrictions(18,"0123456789.-");addAndMakeVisible(field);}
@@ -85,7 +88,14 @@ public:
         sendButton.onClick=[this]{action([this]{session.addSend(timeline.selectedTrack,outputTrack.getSelectedId()-2,float(sendDb.getText().getDoubleValue()),preSend.getToggleState());});};
         exportDepth.addItem("PCM 24-bit",24);exportDepth.addItem("Float 32-bit",32);exportDepth.setSelectedId(24);addAndMakeVisible(exportDepth);addAndMakeVisible(cancelExport);
         cancelExport.onClick=[this]{action([this]{exportJob.cancel();});};
-        setSize(1180,760);refresh();startTimer(200);
+        const char* captions[]={"起点 · 采样","终点 · 采样","光标 · 采样","片段增益 · dB","淡入 · 采样","淡出 · 采样","轨道推子 · dB","声像 · -1 到 1","Master · dB","发送 · dB"};
+        for(size_t i=0;i<fieldLabels.size();++i){fieldLabels[i].setText(zh(captions[i]),juce::dontSendNotification);fieldLabels[i].setColour(juce::Label::textColourId,juce::Colour(0xffb7c6d8));addAndMakeVisible(fieldLabels[i]);}
+        clipHeading.setText(zh("片段检查器"),juce::dontSendNotification);mixHeading.setText(zh("轨道混音与路由"),juce::dontSendNotification);addAndMakeVisible(clipHeading);addAndMakeVisible(mixHeading);
+        for(auto* field:{&start,&end,&cursor,&gain,&fadeIn,&fadeOut,&trackDb,&trackPan,&masterDb,&sendDb}){field->setColour(juce::TextEditor::backgroundColourId,juce::Colour(0xff101923));field->setColour(juce::TextEditor::textColourId,juce::Colour(0xffedf4fc));field->setColour(juce::TextEditor::focusedOutlineColourId,juce::Colour(0xff66c9bc));}
+        for(auto& b:buttons){b->setColour(juce::TextButton::buttonColourId,juce::Colour(0xff293a4d));b->setColour(juce::TextButton::textColourOffId,juce::Colour(0xffedf4fc));}
+        buttons[1]->setColour(juce::TextButton::buttonColourId,juce::Colour(0xff24675f));
+        status.setText(zh("就绪 · 离线编辑 · 音频设备未打开"),juce::dontSendNotification);
+        setSize(1360,900);refresh();startTimer(200);
     }
     void action(std::function<void()> fn){try{fn();status.setText(zh("操作完成 · 离线模式，音频设备未打开"),juce::dontSendNotification);refresh();}catch(const std::exception& e){status.setText(zh("未执行：")+juce::String::fromUTF8(e.what()),juce::dontSendNotification);}}
     void refresh(){timeline.refresh();syncMixer();auto missing=session.missingMedia();if(!missing.isEmpty())status.setText(zh("缺失素材：")+juce::String(missing.size())+zh(" 个；请选中片段并重定位素材"),juce::dontSendNotification);repaint();}
@@ -154,14 +164,27 @@ public:
         auto changed=session.edit->getTimeOfLastChange().toMilliseconds();if(session.edit->hasChangedSinceSaved()&&changed>lastSnapshot){action([this,changed]{session.checkpoint();lastSnapshot=changed;});}
     }
     void resized()override{
-        title.setBounds(20,12,getWidth()-40,34);status.setBounds(20,48,getWidth()-40,28);
-        for(size_t i=0;i<buttons.size();++i)buttons[i]->setBounds(20+int(i%7)*150,82+int(i/7)*38,140,30);
-        help.setBounds(20,205,getWidth()-40,24);int x=20;for(auto* field:{&start,&end,&cursor,&gain,&fadeIn,&fadeOut}){field->setBounds(x,233,140,28);x+=150;}
-        snap.setBounds(20,269,160,30);zoom.setBounds(200,269,350,30);mixHelp.setBounds(20,305,600,24);int mx=20;for(auto* field:{&trackDb,&trackPan,&masterDb,&sendDb}){field->setBounds(mx,333,95,28);mx+=105;}
-        mute.setBounds(450,333,75,28);solo.setBounds(530,333,75,28);applyMix.setBounds(615,333,110,28);busButton.setBounds(740,333,110,28);
-        outputTrack.setBounds(20,371,210,28);routeButton.setBounds(240,371,110,28);preSend.setBounds(370,371,150,28);sendButton.setBounds(530,371,110,28);
-        exportDepth.setBounds(660,371,150,28);cancelExport.setBounds(825,371,110,28);
-        viewport.setBounds(20,415,getWidth()-40,getHeight()-435);
+        const int margin=16, side=316, sx=getWidth()-side-margin;
+        title.setBounds(margin,12,getWidth()-32,32);status.setBounds(margin,46,getWidth()-32,24);
+        const int cell=(getWidth()-margin*2)/10;
+        for(size_t i=0;i<buttons.size();++i)buttons[i]->setBounds(margin+int(i%10)*cell,82+int(i/10)*38,cell-6,32);
+        snap.setBounds(margin,162,155,28);zoom.setBounds(180,162,330,28);
+        help.setBounds(margin,getHeight()-32,getWidth()-32,24);
+        viewport.setBounds(margin,204,sx-margin-12,getHeight()-244);
+        clipHeading.setBounds(sx+12,204,side-24,28);
+        juce::TextEditor* clipFields[]={&start,&end,&cursor,&gain,&fadeIn,&fadeOut};
+        for(int i=0;i<6;++i){int x=sx+12+(i%2)*148,y=240+(i/2)*54;fieldLabels[size_t(i)].setBounds(x,y,140,20);clipFields[i]->setBounds(x,y+21,140,28);}
+        mixHeading.setBounds(sx+12,408,side-24,28);
+        juce::TextEditor* mixFields[]={&trackDb,&trackPan,&masterDb,&sendDb};
+        for(int i=0;i<4;++i){int x=sx+12+(i%2)*148,y=444+(i/2)*54;fieldLabels[size_t(i+6)].setBounds(x,y,140,20);mixFields[i]->setBounds(x,y+21,140,28);}
+        mute.setBounds(sx+12,558,70,30);solo.setBounds(sx+86,558,70,30);applyMix.setBounds(sx+164,558,136,30);
+        outputTrack.setBounds(sx+12,600,140,30);routeButton.setBounds(sx+164,600,136,30);
+        preSend.setBounds(sx+12,642,140,30);sendButton.setBounds(sx+164,642,136,30);
+        busButton.setBounds(sx+12,684,140,30);exportDepth.setBounds(sx+164,684,136,30);cancelExport.setBounds(sx+12,726,288,30);
     }
-    void paint(juce::Graphics& g)override{g.fillAll(juce::Colour(0xff171f2a));}
+    void paint(juce::Graphics& g)override{
+        g.fillAll(juce::Colour(0xff141d28));g.setColour(juce::Colour(0xff202d3c));
+        g.fillRoundedRectangle(float(getWidth()-332),200,316,float(getHeight()-240),8);
+        g.setColour(juce::Colour(0xff34465b));g.drawHorizontalLine(196,16,float(getWidth()-16));
+    }
 };

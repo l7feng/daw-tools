@@ -9,8 +9,8 @@
 class Window final:public juce::DocumentWindow {
     Session& owner;bool confirming=false;
 public:
-    Window(Session& s):DocumentWindow("Studio Workbench 0.1.0",juce::Colour(0xff171d26),allButtons),owner(s){
-        setUsingNativeTitleBar(true);setContentOwned(new MainPanel(s),true);setResizable(true,true);setResizeLimits(1100,700,4096,2160);centreWithSize(1180,760);setVisible(true);
+    Window(Session& s):DocumentWindow("Studio Workbench 0.1.1",juce::Colour(0xff171d26),allButtons),owner(s){
+        setUsingNativeTitleBar(true);setContentOwned(new MainPanel(s),true);setResizable(true,true);setResizeLimits(1240,850,4096,2160);centreWithSize(1360,900);setVisible(true);
     }
     void closeButtonPressed() override {
         if(!owner.edit->hasChangedSinceSaved()){juce::JUCEApplication::getInstance()->systemRequestedQuit();return;}
@@ -23,7 +23,7 @@ class App final:public juce::JUCEApplication {
 public:
     std::unique_ptr<Session> session;std::unique_ptr<Window> window;
     const juce::String getApplicationName() override{return "StudioWorkbenchValidation";}
-    const juce::String getApplicationVersion() override{return "0.1.0";}
+    const juce::String getApplicationVersion() override{return "0.1.1";}
     void initialise(const juce::String& line) override {
         auto args=juce::StringArray::fromTokens(line,false);int index=args.indexOf("--workspace");
         if(index<0 || index+1>=args.size() || !juce::File::isAbsolutePath(args[index+1])) {setApplicationReturnValue(2);quit();return;}
@@ -32,7 +32,8 @@ public:
         try {
             if(args.contains("--scan-plugin")){scanPlugin(root);quit();return;}
             session=std::make_unique<Session>(root);
-            if(args.contains("--render-worker")){renderWorker(*session);quit();}
+            if(args.contains("--ui-snapshot")){MainPanel panel(*session);panel.setSize(1360,900);auto shot=panel.createComponentSnapshot(panel.getLocalBounds());juce::PNGImageFormat png;auto stream=root.getChildFile("gui-preview.png").createOutputStream();require(stream&&png.writeImageToStream(shot,*stream),"GUI snapshot failed");quit();}
+            else if(args.contains("--render-worker")){renderWorker(*session);quit();}
             else if(args.contains("--self-test")) {offlineTest(*session);editorTest(*session);crossfadeTest(*session);mixerTest(*session);exportTest(*session);root.getChildFile("PASS.txt").replaceWithText("Offline signal and persistence passed; no audio devices opened.");quit();}
             else window=std::make_unique<Window>(*session);
         } catch(const std::exception& e) {root.getChildFile("FAIL.txt").replaceWithText(e.what());setApplicationReturnValue(1);quit();}
