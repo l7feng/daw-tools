@@ -27,7 +27,7 @@ if(STUDIO_BUILD_ENGINE)
   juce_generate_juce_header(StudioWorkbench)
   target_sources(StudioWorkbench PRIVATE src/workbench.cpp)
   set_property(SOURCE src/workbench.cpp PROPERTY OBJECT_DEPENDS
-    "${CMAKE_SOURCE_DIR}/src/export_job.hpp;${CMAKE_SOURCE_DIR}/src/session.hpp;${CMAKE_SOURCE_DIR}/src/editor.hpp;${CMAKE_SOURCE_DIR}/tests/offline_cases.hpp;${CMAKE_SOURCE_DIR}/tests/editor_cases.hpp;${CMAKE_SOURCE_DIR}/tests/mixer_cases.hpp;${CMAKE_SOURCE_DIR}/tests/export_cases.hpp")
+    "${CMAKE_SOURCE_DIR}/src/plugin_scan.hpp;${CMAKE_SOURCE_DIR}/src/export_job.hpp;${CMAKE_SOURCE_DIR}/src/session.hpp;${CMAKE_SOURCE_DIR}/src/editor.hpp;${CMAKE_SOURCE_DIR}/tests/offline_cases.hpp;${CMAKE_SOURCE_DIR}/tests/editor_cases.hpp;${CMAKE_SOURCE_DIR}/tests/mixer_cases.hpp;${CMAKE_SOURCE_DIR}/tests/export_cases.hpp")
   target_compile_features(StudioWorkbench PRIVATE cxx_std_20)
   target_compile_definitions(StudioWorkbench PRIVATE
     STUDIO_SOURCE_ROOT="${CMAKE_SOURCE_DIR}"

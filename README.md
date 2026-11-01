@@ -42,3 +42,9 @@ D:\Ai-Files\Tools\BuildEnv\py312\python.exe -X utf8 scripts/run-workbench.py --e
 保存先写同目录临时文件并验证 XML，再替换现有工程；另存与导出拒绝既有目标。自动恢复点不替代正式保存，存储介质掉电/满盘/进程崩溃场景尚未完整验证。
 
 当前仍是开发增量，S2 未完成：VST3扫描/编辑器/PDC/冻结、实际录音/MIDI、自动化、视频与AAF尚待实现及验证；波形界面和真实操作链尚未验收。全部测试禁用音频设备，不播放、不录音。仅有单机离线结果，不能视为实时、GUI、业务或发行通过。
+
+## 隔离VST3扫描开发入口
+
+`python scripts/scan-plugins.py <明确指定的插件.vst3> [其他候选] --timeout 20`
+
+每个候选使用独立子进程；不搜索系统插件目录，不创建音频Session或设备管理器。重复路径去重；异常退出、超时、坏报告分别留证，每项完成后保存report.json，后续候选继续。结果在build/native-validation/scan-*。监督程序的故障注入测试用`python tests/test_scan_supervisor.py`运行，它验证进程控制，不代表真实插件通过。当前仅验证原生扫描器拒绝无效/缺失文件；正常VST3样本、GUI插件列表和实际插件链尚待接入。第三方插件自身的外部副作用并不由进程隔离自动限制。

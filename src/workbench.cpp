@@ -1,4 +1,5 @@
 #include "session.hpp"
+#include "plugin_scan.hpp"
 #include "../tests/offline_cases.hpp"
 #include "../tests/editor_cases.hpp"
 #include "../tests/mixer_cases.hpp"
@@ -29,6 +30,7 @@ public:
         juce::File root(args[index+1]);
         if(!root.isAChildOf(juce::File(STUDIO_SOURCE_ROOT).getChildFile("build")) || !root.getChildFile("studio-validation.marker").existsAsFile()) {setApplicationReturnValue(2);quit();return;}
         try {
+            if(args.contains("--scan-plugin")){scanPlugin(root);quit();return;}
             session=std::make_unique<Session>(root);
             if(args.contains("--render-worker")){renderWorker(*session);quit();}
             else if(args.contains("--self-test")) {offlineTest(*session);editorTest(*session);crossfadeTest(*session);mixerTest(*session);exportTest(*session);root.getChildFile("PASS.txt").replaceWithText("Offline signal and persistence passed; no audio devices opened.");quit();}
