@@ -271,6 +271,10 @@ public:
             for(int i=0;i<originals.size();++i){juce::Array<te::AudioTrack*> forward,backward;if(reaches(target,*originals[i],forward)||reaches(*originals[i],target,backward))included.add(i);}
             te::Edit::Options options{engine,edit->state.createCopy(),te::ProjectItemID::createNewID(0)};options.role=te::Edit::forRendering;options.numAudioTracks=0;options.editFileRetriever=[this]{return projectFile;};stemEdit=std::make_unique<te::Edit>(options);
             auto copies=te::getAudioTracks(*stemEdit);for(int i=0;i<copies.size();++i)if(!included.contains(i)){copies[i]->setMute(true);copies[i]->setSolo(false);}
+            if(bool(target.state.getProperty("studioBus")))for(int i=0;i<copies.size();++i)if(i!=selectedTrack&&copies[i]->getOutput().getDestinationTrack()==nullptr){
+                juce::Array<te::AudioTrack*> downstream;if(reaches(target,*originals[i],downstream))continue;
+                auto attenuation=stemEdit->getPluginCache().createNewPlugin(te::VolumeAndPanPlugin::xmlTypeName,{});auto* volume=dynamic_cast<te::VolumeAndPanPlugin*>(attenuation.get());require(volume!=nullptr,"Bus stem output gate failed");volume->setVolumeDb(-1000);copies[i]->pluginList.insertPlugin(attenuation,-1,nullptr);
+            }
         }
         auto& renderingEdit=stemEdit?*stemEdit:*edit;
         juce::WavAudioFormat wav;
