@@ -79,11 +79,75 @@ public:
         t->setName("Track " + juce::String(te::getAudioTracks(*edit).size()));
         return t.get();
     }
+    static bool descriptionMatches(const juce::PluginDescription& desc,juce::ValueTree node){
+        return node.getProperty("type").toString()=="vst"&&desc.pluginFormatName=="VST3"
+            &&juce::File::isAbsolutePath(node.getProperty("filename").toString())
+            &&pluginBundle(desc.fileOrIdentifier)==pluginBundle(node.getProperty("filename").toString())
+            &&node.getProperty("uniqueId").toString()==juce::String::toHexString(desc.uniqueId)
+            &&node.getProperty("uid").toString()==juce::String::toHexString(desc.deprecatedUid)
+            &&node.getProperty("manufacturer").toString()==desc.manufacturerName;
+    }
+    static juce::Array<juce::ValueTree> referencedPluginStates(juce::ValueTree state){
+        juce::Array<juce::ValueTree> result;
+        std::function<void(juce::ValueTree)> visit=[&](juce::ValueTree node){if(node.getType().toString()=="STUDIOPLUGINCATALOG")return;if(node.getProperty("type").toString()=="vst")result.add(node);for(auto child:node)visit(child);};visit(state);return result;
+    }
+    void updatePluginCatalog(){
+        auto previous=edit->state.getChildWithName("STUDIOPLUGINCATALOG");juce::ValueTree catalog("STUDIOPLUGINCATALOG");catalog.setProperty("version",1,nullptr);juce::StringArray identities;
+        auto known=engine.getPluginManager().knownPluginList.getTypes();auto references=referencedPluginStates(edit->state);
+        for(auto node:references){
+            std::unique_ptr<juce::PluginDescription> description;
+            for(auto type:known)if(descriptionMatches(type,node)){description=std::make_unique<juce::PluginDescription>(type);break;}
+            if(!description)for(auto child:previous){auto candidate=std::make_unique<juce::PluginDescription>();auto xml=child.createXml();if(xml&&candidate->loadFromXml(*xml)&&descriptionMatches(*candidate,node)){description=std::move(candidate);break;}}
+            if(!description)continue; // Legacy/missing instances retain raw state without guessing metadata.
+            description->fileOrIdentifier=pluginBundle(description->fileOrIdentifier).getFullPathName();auto key=description->fileOrIdentifier+":"+juce::String::toHexString(description->uniqueId)+":"+juce::String::toHexString(description->deprecatedUid);
+            if(identities.contains(key))continue;identities.add(key);catalog.addChild(juce::ValueTree::fromXml(*description->createXml()),-1,nullptr);
+        }
+        if(previous.isValid()&&previous.isEquivalentTo(catalog))return;
+        if(previous.isValid())edit->state.removeChild(previous,nullptr);
+        if(!references.isEmpty())edit->state.addChild(catalog,-1,nullptr);
+    }
+    void registerLegacyProjectPlugins(juce::ValueTree state,int timeoutMs){
+        require(timeoutMs>0&&timeoutMs<=300000,"Invalid project plugin scan timeout");auto references=referencedPluginStates(state);juce::Array<juce::File> scanned;auto& known=engine.getPluginManager().knownPluginList;
+        for(auto node:references){bool registered=false;for(auto type:known.getTypes())if(descriptionMatches(type,node)){registered=true;break;}if(registered)continue;
+            auto path=pluginBundle(node.getProperty("filename").toString());if(!path.exists()||!path.hasFileExtension("vst3")||scanned.contains(path))continue;scanned.add(path);
+            auto folder=root.getChildFile("legacy-scan-"+juce::Uuid().toString());require(folder.createDirectory().wasOk(),"Cannot create project scan directory");require(folder.getChildFile("studio-validation.marker").replaceWithText("referenced legacy project plugin scan"),"Cannot mark project scan");auto* request=new juce::DynamicObject;request->setProperty("path",path.getFullPathName());require(folder.getChildFile("scan-request.json").replaceWithText(juce::JSON::toString(juce::var(request))),"Cannot write project scan request");
+            auto record=[&](const juce::String& status,int code){auto* result=new juce::DynamicObject;result->setProperty("status",status);result->setProperty("exit_code",code);result->setProperty("path",path.getFullPathName());folder.getChildFile("scan-status.json").replaceWithText(juce::JSON::toString(juce::var(result)));};
+            juce::ChildProcess process;if(!process.start(juce::StringArray{juce::File::getSpecialLocation(juce::File::currentExecutableFile).getFullPathName(),"--workspace",folder.getFullPathName(),"--scan-plugin"},0)){record("failed",-1);continue;}
+            auto deadline=juce::Time::getMillisecondCounterHiRes()+timeoutMs;while(process.isRunning()&&juce::Time::getMillisecondCounterHiRes()<deadline)juce::Thread::sleep(5);
+            if(process.isRunning()){require(process.kill()||!process.isRunning(),"Cannot stop project plugin scanner");require(process.waitForProcessToFinish(2000),"Project plugin scanner did not exit");record("timed_out",int(process.getExitCode()));continue;}
+            if(process.getExitCode()!=0){record("failed",int(process.getExitCode()));continue;}
+            auto xml=juce::XmlDocument::parse(folder.getChildFile("scan-result.xml"));if(!xml||!xml->hasTagName("PLUGIN_SCAN")){record("invalid_result",0);continue;}
+            int matched=0;for(auto* entry:xml->getChildIterator()){juce::PluginDescription description;if(!description.loadFromXml(*entry))continue;for(auto reference:references)if(descriptionMatches(description,reference)){known.addType(description);++matched;break;}}
+            record(matched?"complete":"identity_mismatch",0);
+        }
+    }
+    void registerProjectPlugins(juce::ValueTree state,int timeoutMs){
+        auto catalog=state.getChildWithName("STUDIOPLUGINCATALOG");if(!catalog.isValid()){registerLegacyProjectPlugins(state,timeoutMs);return;}
+        int count=0;for(auto child:state)if(child.getType().toString()=="STUDIOPLUGINCATALOG")++count;
+        require(count==1&&int(catalog.getProperty("version"))==1,"Invalid project plugin catalog version");
+        auto references=referencedPluginStates(state);juce::OwnedArray<juce::PluginDescription> selected;juce::StringArray identities;
+        for(auto child:catalog){auto description=std::make_unique<juce::PluginDescription>();auto xml=child.createXml();require(xml&&description->loadFromXml(*xml)&&description->pluginFormatName=="VST3"&&juce::File::isAbsolutePath(description->fileOrIdentifier),"Invalid saved VST3 description");
+            bool referenced=false;for(auto node:references)if(descriptionMatches(*description,node)){referenced=true;break;}if(!referenced)continue;
+            description->fileOrIdentifier=pluginBundle(description->fileOrIdentifier).getFullPathName();auto key=description->fileOrIdentifier+":"+juce::String::toHexString(description->uniqueId)+":"+juce::String::toHexString(description->deprecatedUid);int duplicate=identities.indexOf(key);
+            if(duplicate>=0){require(selected[duplicate]->createXml()->toString()==description->createXml()->toString(),"Conflicting saved plugin descriptions");continue;}
+            identities.add(key);selected.add(description.release());
+        }
+        // Parse and validate all entries before mutating the engine-local catalog.
+        auto& known=engine.getPluginManager().knownPluginList;
+        for(auto* description:selected){bool registered=false;for(auto type:known.getTypes())for(auto node:references)if(descriptionMatches(*description,node)&&descriptionMatches(type,node)){registered=true;break;}if(!registered)known.addType(*description);}
+    }
+    std::unique_ptr<te::Edit> createProjectEdit(juce::ValueTree state,te::ProjectItemID id,const juce::File& file,int scanTimeoutMs=20000){
+        engine.getPluginManager().initialise();auto& known=engine.getPluginManager().knownPluginList;auto before=known.createXml();
+        try{registerProjectPlugins(state,scanTimeoutMs);te::Edit::Options options{engine,state,id};options.role=te::Edit::forRendering;options.numAudioTracks=0;options.editFileRetriever=[file]{return file;};auto next=std::make_unique<te::Edit>(options);
+            for(auto node:referencedPluginStates(next->state)){auto item=next->getPluginCache().getOrCreatePluginFor(node);if(auto* plugin=dynamic_cast<te::ExternalPlugin*>(item.get())){plugin->initialiseFully();if(auto* instance=plugin->getAudioPluginInstance()){juce::PluginDescription actual;instance->fillInPluginDescription(actual);require(descriptionMatches(actual,node)&&actual.isInstrument==plugin->desc.isInstrument,"Saved plugin description differs from runtime identity");}}}
+            validateFrozenEdit(*next);return next;}
+        catch(...){if(before)known.recreateFromXml(*before);throw;}
+    }
     void writeProject(const juce::File& target,bool allowReplace,bool updateCurrent=true,std::function<bool()> cancelBeforeCommit={}) {
         require(!target.isDirectory()&&target.getParentDirectory().isDirectory(),"Invalid project destination");
         require(allowReplace||!target.exists(),"Project destination exists");
         auto staging=target.getSiblingFile(target.getFileName()+"."+juce::Uuid().toString()+".partial");
-        validateFrozenTracks();
+        validateFrozenTracks();updatePluginCatalog();
         edit->state.setProperty("studioVersion","0.1.0",nullptr);
         edit->state.setProperty("studioProjectID",edit->getProjectItemID().toString(),nullptr);
         for(auto* track:te::getAudioTracks(*edit))if(track->isFrozen(te::Track::individualFreeze)){
@@ -100,7 +164,7 @@ public:
         if(updateCurrent){projectFile=target;edit->editFileRetriever=[this]{return projectFile;};edit->resetChangedStatus();}
     }
     void save() {writeProject(projectFile,true);}
-    void openProject(const juce::File& f) {
+    void openProject(const juce::File& f,int scanTimeoutMs=20000) {
         juce::XmlDocument document(f);auto xml=document.getDocumentElement();
         require(document.getLastParseError().isEmpty() && xml && xml->hasTagName("EDIT"),"Invalid project: complete EDIT document required");
         auto text=f.loadFileAsString().trimEnd();
@@ -116,11 +180,7 @@ public:
             }
             for(auto child:node)restoreFreeze(child);
         };restoreFreeze(state);
-        te::Edit::Options options{engine,state,id};
-        options.role=te::Edit::forRendering; options.numAudioTracks=0;
-        options.editFileRetriever=[f]{return f;};
-        auto next=std::make_unique<te::Edit>(options);
-        validateFrozenEdit(*next);projectFile=f;edit=std::move(next);
+        auto next=createProjectEdit(state,id,f,scanTimeoutMs);projectFile=f;edit=std::move(next);
     }
     void reopen() {openProject(projectFile);}
     void saveAs(const juce::File& f) {
@@ -202,17 +262,16 @@ public:
         for(int i=state.getNumChildren();--i>=0;){auto child=state.getChild(i);if(child.getType().toString().endsWith("CLIP")||child.getProperty("type").toString()=="freezePoint")state.removeChild(i,nullptr);else stripTemplateMedia(child);}
     }
     void saveTemplate(const juce::File& target) {
-        require(!target.exists(),"Template target exists");edit->flushState();auto state=edit->state.createCopy();stripTemplateMedia(state);
+        require(!target.exists(),"Template target exists");edit->flushState();updatePluginCatalog();auto state=edit->state.createCopy();stripTemplateMedia(state);
         state.setProperty("studioTemplate",1,nullptr);state.removeProperty("projectID",nullptr);state.removeProperty("modifiedBy",nullptr);
         require(state.createXml()->writeTo(target),"Template write failed");
     }
-    void loadTemplate(const juce::File& file) {
+    void loadTemplate(const juce::File& file,int scanTimeoutMs=20000) {
         auto xml=juce::XmlDocument::parse(file);require(xml&&xml->hasTagName("EDIT")&&xml->getIntAttribute("studioTemplate")==1,"Invalid user template");
         auto state=juce::ValueTree::fromXml(*xml);stripTemplateMedia(state);state.removeProperty("studioTemplate",nullptr);
         auto target=root.getNonexistentChildFile("untitled",".tracktionedit",false);
         auto id=te::ProjectItemID::createNewID(0);
-        te::Edit::Options options{engine,state,id};options.role=te::Edit::forRendering;options.numAudioTracks=0;options.editFileRetriever=[target]{return target;};
-        auto next=std::make_unique<te::Edit>(options);projectFile=target;edit=std::move(next);
+        auto next=createProjectEdit(state,id,target,scanTimeoutMs);projectFile=target;edit=std::move(next);
     }
     juce::File checkpoint() {
         auto folder=root.getChildFile("recovery");require(folder.createDirectory().wasOk(),"Recovery directory failed");

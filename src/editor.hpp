@@ -70,7 +70,7 @@ public:
     std::unique_ptr<juce::FileChooser> chooser;std::unique_ptr<PluginsWindow> pluginWindow;
     explicit MainPanel(Session& s):session(s),timeline(s){
         setWantsKeyboardFocus(true);viewport.setViewedComponent(&timeline,false);addAndMakeVisible(viewport);
-        title.setText(zh("Studio Workbench · 编辑工作站 0.1.2"),juce::dontSendNotification);title.setFont(juce::FontOptions(23));addAndMakeVisible(title);addAndMakeVisible(status);addAndMakeVisible(help);
+        title.setText(zh("Studio Workbench · 编辑工作站 0.1.3"),juce::dontSendNotification);title.setFont(juce::FontOptions(23));addAndMakeVisible(title);addAndMakeVisible(status);addAndMakeVisible(help);
         const std::pair<const char*,Command> specs[]={{"添加轨道",addTrack},{"导入音频",importFile},{"保存",saveProject},{"打开",openProject},{"另存为",saveCopy},{"撤销",undoEdit},{"重做",redoEdit},{"切分",splitClip},{"复制",copyClip},{"删除片段",removeClip},{"移动",moveClip},{"裁剪",trimClip},{"应用增益/淡化",envelope},{"导出 WAV",exportWave},{"保存自定模板",saveUserTemplate},{"从模板新建",openUserTemplate},{"重定位素材",relinkMedia},{"交叉淡化",crossfadeClips},{"保存恢复点",recovery},{"插件链",plugins}};
         for(auto [label,command]:specs){auto b=std::make_unique<juce::TextButton>(zh(label));b->setWantsKeyboardFocus(false);b->onClick=[this,command]{perform(command);};addAndMakeVisible(*b);buttons.push_back(std::move(b));}
         for(auto* field:{&start,&end,&cursor,&gain,&fadeIn,&fadeOut}){field->setInputRestrictions(18,"0123456789.-");addAndMakeVisible(field);}
