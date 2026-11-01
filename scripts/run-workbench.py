@@ -10,7 +10,7 @@ assert root.resolve().is_relative_to((r/'build').resolve())
 env=dict(os.environ,TEMP=str(root/'os-temp'),TMP=str(root/'os-temp'))
 build='editor' if '--editor' in sys.argv else 'engine'
 exe=r/f'build/{build}/StudioWorkbench_artefacts/Release'/('Studio Workbench Verified.exe' if '--verified' in sys.argv else 'Studio Workbench.exe')
-args=[str(exe),'--workspace',str(root)]+([] if gui else ['--workspace-ui-test'] if '--workspace-ui-test' in sys.argv else ['--plugin-ui-test'] if '--plugin-ui-test' in sys.argv else ['--self-test'])
+args=[str(exe),'--workspace',str(root)]+(['--gui-input-probe'] if gui and '--gui-input-probe' in sys.argv else [] if gui else ['--workspace-ui-test'] if '--workspace-ui-test' in sys.argv else ['--plugin-ui-test'] if '--plugin-ui-test' in sys.argv else ['--self-test'])
 if gui:
  process=subprocess.Popen(args,env=env,cwd=r)
  (r/'build/last-ui-run.json').write_text(json.dumps({'root':str(root),'pid':process.pid}))

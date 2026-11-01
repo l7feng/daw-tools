@@ -13,8 +13,8 @@
 class Window final:public juce::DocumentWindow {
     Session& owner;bool confirming=false;
 public:
-    Window(Session& s):DocumentWindow("Studio Workbench 0.1.4",juce::Colour(0xff171d26),allButtons),owner(s){
-        setUsingNativeTitleBar(true);setContentOwned(new MainPanel(s,true),true);setResizable(true,true);setResizeLimits(1240,850,4096,2160);centreWithSize(1600,960);setVisible(true);
+    Window(Session& s,bool keepLayout=true):DocumentWindow("Studio Workbench 0.1.5",juce::Colour(0xff171d26),allButtons),owner(s){
+        setUsingNativeTitleBar(true);setContentOwned(new MainPanel(s,keepLayout),true);setResizable(true,true);setResizeLimits(1240,850,4096,2160);centreWithSize(1600,960);setVisible(true);
     }
     void closeButtonPressed() override {
         if(!owner.edit->hasChangedSinceSaved()){juce::JUCEApplication::getInstance()->systemRequestedQuit();return;}
@@ -27,7 +27,7 @@ class App final:public juce::JUCEApplication {
 public:
     std::unique_ptr<Session> session;std::unique_ptr<Window> window;
     const juce::String getApplicationName() override{return "StudioWorkbenchValidation";}
-    const juce::String getApplicationVersion() override{return "0.1.4";}
+    const juce::String getApplicationVersion() override{return "0.1.5";}
     void initialise(const juce::String& line) override {
         auto args=juce::StringArray::fromTokens(line,false);int index=args.indexOf("--workspace");
         if(index<0 || index+1>=args.size() || !juce::File::isAbsolutePath(args[index+1])) {setApplicationReturnValue(2);quit();return;}
@@ -43,7 +43,7 @@ public:
             else if(args.contains("--stem-worker")){stemWorker(*session);quit();}
             else if(args.contains("--render-worker")){renderWorker(*session);quit();}
             else if(args.contains("--self-test")) {offlineTest(*session);editorTest(*session);crossfadeTest(*session);mixerTest(*session);exportTest(*session);root.getChildFile("PASS.txt").replaceWithText("Offline signal and persistence passed; no audio devices opened.");quit();}
-            else window=std::make_unique<Window>(*session);
+            else {window=std::make_unique<Window>(*session,!args.contains("--gui-input-probe"));if(args.contains("--gui-input-probe"))if(auto* panel=dynamic_cast<MainPanel*>(window->getContentComponent()))panel->inputProbe=true;}
         } catch(const std::exception& e) {root.getChildFile("FAIL.txt").replaceWithText(e.what());setApplicationReturnValue(1);quit();}
     }
     void shutdown() override {window.reset();session.reset();}
