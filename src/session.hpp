@@ -229,17 +229,25 @@ public:
     }
     void undo(){edit->undo();edit->getUndoManager().beginNewTransaction();}
     void redo(){edit->redo();edit->getUndoManager().beginNewTransaction();}
-    void render(const juce::File& output, int blockSize=128, int64_t endSample=48000, int bitDepth=32, int64_t startSample=0) {
+    void render(const juce::File& output, int blockSize=128, int64_t endSample=48000, int bitDepth=32, int64_t startSample=0, int selectedTrack=-1, bool includeMaster=true) {
         require(!output.exists(),"output already exists");
         for(auto* track:te::getAudioTracks(*edit))for(auto* plugin:track->pluginList.getPluginsOfType<te::ExternalPlugin>()){plugin->initialiseFully();require(plugin->getAudioPluginInstance()!=nullptr,"Cannot export: unavailable external plugin");}
         for(auto* plugin:edit->getMasterPluginList().getPluginsOfType<te::ExternalPlugin>()){plugin->initialiseFully();require(plugin->getAudioPluginInstance()!=nullptr,"Cannot export: unavailable master plugin");}
+        std::unique_ptr<te::Edit> stemEdit;
+        if(selectedTrack>=0){auto& target=trackAt(selectedTrack);juce::Array<int> included;auto originals=te::getAudioTracks(*edit);
+            for(int i=0;i<originals.size();++i){juce::Array<te::AudioTrack*> forward,backward;if(reaches(target,*originals[i],forward)||reaches(*originals[i],target,backward))included.add(i);}
+            te::Edit::Options options{engine,edit->state.createCopy(),te::ProjectItemID::createNewID(0)};options.role=te::Edit::forRendering;options.numAudioTracks=0;options.editFileRetriever=[this]{return projectFile;};stemEdit=std::make_unique<te::Edit>(options);
+            auto copies=te::getAudioTracks(*stemEdit);for(int i=0;i<copies.size();++i)if(!included.contains(i)){copies[i]->setMute(true);copies[i]->setSolo(false);}
+        }
+        auto& renderingEdit=stemEdit?*stemEdit:*edit;
         juce::WavAudioFormat wav;
-        te::Renderer::Parameters p(*edit);
+        te::Renderer::Parameters p(renderingEdit);
         p.destFile=output; p.audioFormat=&wav; p.sampleRateForAudio=48000;
         require(startSample>=0 && endSample>startSample && (bitDepth==24 || bitDepth==32),"Invalid export range/format");
-        p.bitDepth=bitDepth; p.blockSizeForAudio=blockSize; p.canRenderInMono=false; p.useMasterPlugins=true;
+        p.bitDepth=bitDepth; p.blockSizeForAudio=blockSize; p.canRenderInMono=false; p.useMasterPlugins=includeMaster;
         p.time={time(startSample),time(endSample)};
-        p.tracksToDo=te::toBitSet(te::getAllTracks(*edit));
+        p.tracksToDo=te::toBitSet(te::getAllTracks(renderingEdit));
+        require(selectedTrack>=-1,"Invalid stem track");
         require(te::Renderer::renderToFile("Offline validation",p).existsAsFile(),"render failed");
     }
 };
