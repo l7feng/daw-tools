@@ -62,3 +62,11 @@ python scripts/scan-plugins.py "build/editor/StudioTestGain_artefacts/Release/VS
 ## 0.1.1 GUI与桌面入口
 
 GUI调整为顶部两行操作、主时间线、右侧带可见标签的片段/混音检查器；时间标尺保持约100像素以上主刻度间距。最小窗口1240×850，默认1360×900。桌面`Studio Workbench GUI`快捷方式调用scripts/open-gui.py，每次打开当前最新构建及新的独立空白工作目录，已有工程通过“打开”恢复。更新后重新打开窗口查看版本号；不会替换正在运行的旧窗口，也不提供热重载。音频设备保持关闭。
+
+## S1独立设备探针与ASIO
+
+`scripts/restore-asio.py`按dependencies.lock.json恢复并逐文件核验官方ASIO SDK 2.3.4，首次下载须联网；不安装驱动。仅独立BackendProbe启用JUCE_ASIO=1，GUI不因此获得实时功能。SDK本地验证选择其GPLv3许可分支，保留原始许可；没有发行授权变更。
+
+运行`scripts/build-backend.cmd`后，可用`python scripts/run-device.py --capture --driver asio --block 256 --seconds 15`测试已安装Yamaha Steinberg USB ASIO。shared/lowlatency用于UR22C明确Input 1/2和DAW端点。输出数字静音，实际输入会录入独立运行目录；不打开控制面板、不切换默认设备。
+
+报告必须区分请求/实际缓冲、启动/测量窗口、FIFO丢块和驱动过载计数；计数不可用时stable为null。2026-11-01 ASIO请求128/256实际均512，不能称128/256通过。exit0仅说明本探针已执行断言通过，不能替代真实声音、实时引擎、长时稳定性或业务验收。独立异常退出测试入口为scripts/test-capture-recovery.py，只终止它自己创建的采集子进程并保留原始WAV。

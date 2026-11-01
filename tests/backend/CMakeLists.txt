@@ -22,3 +22,11 @@ target_sources(StudioTestDelay PRIVATE delay_fixture.cpp)
 target_compile_features(StudioTestDelay PRIVATE cxx_std_20)
 target_compile_definitions(StudioTestDelay PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
 target_link_libraries(StudioTestDelay PRIVATE juce::juce_audio_utils)
+
+# Pinned official ASIO SDK, local validation only; no driver installation.
+set(STUDIO_ASIO_COMMON "${REPO}/third_party/asio-2.3.4/ASIOSDK/common")
+if(NOT EXISTS "${STUDIO_ASIO_COMMON}/iasiodrv.h")
+ message(FATAL_ERROR "Restore pinned ASIO SDK from dependencies.lock.json")
+endif()
+target_include_directories(BackendProbe PRIVATE "${STUDIO_ASIO_COMMON}")
+target_compile_definitions(BackendProbe PRIVATE JUCE_ASIO=1)
