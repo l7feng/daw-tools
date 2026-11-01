@@ -74,8 +74,10 @@ public:
     }
     void save() {writeProject(projectFile,true);}
     void openProject(const juce::File& f) {
-        auto xml=juce::XmlDocument::parse(f);
-        require(xml && xml->hasTagName("EDIT"),"Invalid project: EDIT document required");
+        juce::XmlDocument document(f);auto xml=document.getDocumentElement();
+        require(document.getLastParseError().isEmpty() && xml && xml->hasTagName("EDIT"),"Invalid project: complete EDIT document required");
+        auto text=f.loadFileAsString().trimEnd();
+        require(text.endsWith("</EDIT>") || (xml->getFirstChildElement()==nullptr && text.endsWith("/>")),"Invalid project: unterminated EDIT document");
         auto state=juce::ValueTree::fromXml(*xml);
         te::Edit::Options options{engine,state,te::ProjectItemID::createNewID(0)};
         options.role=te::Edit::forRendering; options.numAudioTracks=0;
