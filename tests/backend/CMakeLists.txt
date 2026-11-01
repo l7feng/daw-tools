@@ -14,3 +14,11 @@ target_sources(BackendProbe PRIVATE main.cpp)
 target_compile_features(BackendProbe PRIVATE cxx_std_20)
 target_compile_definitions(BackendProbe PRIVATE STUDIO_SOURCE_ROOT="${REPO}" JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_PLUGINHOST_VST3=1 TRACKTION_ENABLE_TIMESTRETCH_SOUNDTOUCH=1)
 target_link_libraries(BackendProbe PRIVATE tracktion::tracktion_engine tracktion::tracktion_core tracktion::tracktion_graph juce::juce_audio_utils juce::juce_cryptography)
+
+juce_add_plugin(StudioTestDelay COMPANY_NAME "StudioWorkbench" PLUGIN_MANUFACTURER_CODE Stwb
+ PLUGIN_CODE Stdl FORMATS VST3 PRODUCT_NAME "Studio Test Delay" VERSION 0.1.0
+ IS_SYNTH FALSE NEEDS_MIDI_INPUT FALSE NEEDS_MIDI_OUTPUT FALSE COPY_PLUGIN_AFTER_BUILD FALSE)
+target_sources(StudioTestDelay PRIVATE delay_fixture.cpp)
+target_compile_features(StudioTestDelay PRIVATE cxx_std_20)
+target_compile_definitions(StudioTestDelay PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
+target_link_libraries(StudioTestDelay PRIVATE juce::juce_audio_utils)

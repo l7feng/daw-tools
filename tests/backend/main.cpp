@@ -42,11 +42,30 @@ static void testChain(const juce::File& root,const juce::File& fixture){
  require(s.engine.getDeviceManager().deviceManager.getCurrentAudioDevice()==nullptr,"Audio device opened");
  root.getChildFile("backend-result.json").replaceWithText("{\"checks\":"+juce::String(checks)+",\"max_error\":"+juce::String(maxError,9)+",\"initial_inputs\":"+juce::String(initialInputs)+",\"initial_outputs\":"+juce::String(initialOutputs)+",\"device_opened\":false}");
 }
+static void testPdc(const juce::File& root){
+ auto dir=root.getChildFile("pdc");dir.createDirectory();Session s(dir);
+ auto source=root.getChildFile("source.wav");s.importAudio(source,0,0);s.importAudio(source,1,0);
+ juce::VST3PluginFormat format;juce::OwnedArray<juce::PluginDescription> types;
+ format.findAllTypesForFile(types,juce::File(STUDIO_SOURCE_ROOT).getChildFile("build/backend/StudioTestDelay_artefacts/Release/VST3/Studio Test Delay.vst3").getFullPathName());
+ require(types.size()==1,"Delay fixture scan failed");s.engine.getPluginManager().initialise();s.engine.getPluginManager().knownPluginList.addType(*types[0]);
+ auto item=s.edit->getPluginCache().createNewPlugin(te::ExternalPlugin::xmlTypeName,*types[0]);
+ auto* effect=dynamic_cast<te::ExternalPlugin*>(item.get());require(effect!=nullptr,"Delay creation failed");
+ s.trackAt(1).pluginList.insertPlugin(item,0,nullptr);effect->initialiseFully();require(effect->getAudioPluginInstance()!=nullptr,"Delay load failed");
+ auto reference=readWave(source);float error=0;int checks=0;
+ for(int block:{128,256}){auto output=dir.getChildFile("parallel-"+juce::String(block)+".wav");s.render(output,block);auto result=readWave(output);
+  require(result.getNumSamples()==48000,"PDC output length differs");
+  for(int c=0;c<2;++c)for(int i=0;i<48000;++i)error=std::max(error,std::abs(result.getSample(c,i)-2*reference.getSample(c,i)));
+  require(error<=1e-6f,"Parallel PDC misalignment");++checks;
+ }
+ require(effect->getAudioPluginInstance()->getLatencySamples()==257,"Fixture latency not reported");
+ require(s.engine.getDeviceManager().deviceManager.getCurrentAudioDevice()==nullptr,"PDC opened device");
+ dir.getChildFile("pdc-result.json").replaceWithText("{\"checks\":"+juce::String(checks)+",\"latency_samples\":257,\"max_error\":"+juce::String(error,9)+",\"device_opened\":false}");
+}
 class Probe:public juce::JUCEApplication{
 public:
  const juce::String getApplicationName()override{return "Studio Backend Probe";}
  const juce::String getApplicationVersion()override{return "0.1.0";}
- void initialise(const juce::String& command)override{auto args=juce::StringArray::fromTokens(command,true);if(args.size()!=2){setApplicationReturnValue(2);quit();return;}juce::File root(args[0].unquoted()),fixture(args[1].unquoted());if(!root.isAChildOf(juce::File(STUDIO_SOURCE_ROOT).getChildFile("build"))||!root.getChildFile("studio-validation.marker").existsAsFile()){setApplicationReturnValue(2);quit();return;}try{testChain(root,fixture);}catch(const std::exception& e){root.getChildFile("FAIL.txt").replaceWithText(e.what());setApplicationReturnValue(1);}quit();}
+ void initialise(const juce::String& command)override{auto args=juce::StringArray::fromTokens(command,true);if(args.size()!=2){setApplicationReturnValue(2);quit();return;}juce::File root(args[0].unquoted()),fixture(args[1].unquoted());if(!root.isAChildOf(juce::File(STUDIO_SOURCE_ROOT).getChildFile("build"))||!root.getChildFile("studio-validation.marker").existsAsFile()){setApplicationReturnValue(2);quit();return;}try{testChain(root,fixture);testPdc(root);}catch(const std::exception& e){root.getChildFile("FAIL.txt").replaceWithText(e.what());setApplicationReturnValue(1);}quit();}
  void shutdown()override{}
 };
 START_JUCE_APPLICATION(Probe)
