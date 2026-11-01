@@ -231,6 +231,8 @@ public:
     void redo(){edit->redo();edit->getUndoManager().beginNewTransaction();}
     void render(const juce::File& output, int blockSize=128, int64_t endSample=48000, int bitDepth=32, int64_t startSample=0) {
         require(!output.exists(),"output already exists");
+        for(auto* track:te::getAudioTracks(*edit))for(auto* plugin:track->pluginList.getPluginsOfType<te::ExternalPlugin>()){plugin->initialiseFully();require(plugin->getAudioPluginInstance()!=nullptr,"Cannot export: unavailable external plugin");}
+        for(auto* plugin:edit->getMasterPluginList().getPluginsOfType<te::ExternalPlugin>()){plugin->initialiseFully();require(plugin->getAudioPluginInstance()!=nullptr,"Cannot export: unavailable master plugin");}
         juce::WavAudioFormat wav;
         te::Renderer::Parameters p(*edit);
         p.destFile=output; p.audioFormat=&wav; p.sampleRateForAudio=48000;
