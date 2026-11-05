@@ -3,9 +3,9 @@ from pathlib import Path
 import subprocess,os,uuid,ctypes,argparse
 parser=argparse.ArgumentParser();parser.add_argument('--verified',action='store_true');args=parser.parse_args()
 root=Path(__file__).resolve().parents[1]
-exe=root/'build/editor/StudioWorkbench_artefacts/Release'/('Studio Workbench Verified.exe' if args.verified else 'Studio Workbench.exe')
+exe=root/'build/editor/DawTools_artefacts/Release'/('DAW Tools Verified.exe' if args.verified else 'DAW Tools.exe')
 if not exe.is_file():
-    ctypes.windll.user32.MessageBoxW(None,'请先构建 Studio Workbench。','Studio Workbench',16)
+    ctypes.windll.user32.MessageBoxW(None,'请先构建 DAW Tools。','DAW Tools',16)
     raise SystemExit(1)
 workspace=root/'build/gui-sessions'/uuid.uuid4().hex
 workspace.mkdir(parents=True)

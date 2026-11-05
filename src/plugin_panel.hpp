@@ -43,6 +43,6 @@ public:
 };
 class PluginsWindow final:public juce::DocumentWindow {
 public:
- PluginsWindow(Session& s,int track):DocumentWindow(zh("插件链 · Studio Workbench"),juce::Colour(0xff202d3c),closeButton){setUsingNativeTitleBar(true);setContentOwned(new PluginPanel(s,track),true);centreWithSize(720,300);setVisible(true);}
+ PluginsWindow(Session& s,int track):DocumentWindow(zh("插件链 · DAW Tools"),juce::Colour(0xff202d3c),closeButton){setUsingNativeTitleBar(true);setContentOwned(new PluginPanel(s,track),true);centreWithSize(720,300);setVisible(true);}
  void closeButtonPressed()override{setVisible(false);}
 };

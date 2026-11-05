@@ -3,7 +3,7 @@ from pathlib import Path
 import datetime, hashlib, importlib.util, json, uuid
 repo=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('scan_plugins',repo/'scripts/scan-plugins.py');scan=importlib.util.module_from_spec(spec);spec.loader.exec_module(scan)
-exe=repo/'build/editor/StudioWorkbench_artefacts/Release/Studio Workbench Verified.exe'
+exe=repo/'build/editor/DawTools_artefacts/Release/DAW Tools Verified.exe'
 gain=repo/'build/editor/StudioTestGain_artefacts/Release/VST3/Studio Test Gain.vst3'
 crash=repo/'build/backend/StudioScanCrash_artefacts/Release/VST3/Studio Scan Crash.vst3'
 hang=repo/'build/backend/StudioScanHang_artefacts/Release/VST3/Studio Scan Hang.vst3'

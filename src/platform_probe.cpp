@@ -2,7 +2,7 @@
 #include <mmsystem.h>
 #include <iostream>
 int main() {
-    std::wcout << L"Studio Workbench platform probe; enumeration only\n";
+    std::wcout << L"DAW Tools platform probe; enumeration only\n";
     std::wcout << L"wave outputs=" << waveOutGetNumDevs() << L"\n";
     for (UINT i=0;i<waveOutGetNumDevs();++i) {
         WAVEOUTCAPSW caps{};

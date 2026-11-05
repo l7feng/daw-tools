@@ -4,7 +4,7 @@ import argparse,datetime,hashlib,json,os,subprocess,uuid
 parser=argparse.ArgumentParser();parser.add_argument('--verified',action='store_true');args=parser.parse_args()
 repo=Path(__file__).resolve().parents[1];validation=repo/'build/native-validation'
 source=next(folder for folder in sorted(validation.glob('backend-*'),reverse=True) if (folder/'run.json').is_file() and json.loads((folder/'run.json').read_text()).get('exit_code')==0 and (folder/'cold-projects/cold-projects-result.json').is_file() and json.loads((folder/'cold-projects/cold-projects-result.json').read_text()).get('checks',0)>=19)
-exe=repo/'build/editor/StudioWorkbench_artefacts/Release'/('Studio Workbench Verified.exe' if args.verified else 'Studio Workbench.exe')
+exe=repo/'build/editor/DawTools_artefacts/Release'/('DAW Tools Verified.exe' if args.verified else 'DAW Tools.exe')
 root=validation/('app-cold-'+datetime.datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:8]);root.mkdir()
 summary=json.loads((source/'cold-projects/cold-projects-result.json').read_text());reports=[]
 for row in summary['cases']:

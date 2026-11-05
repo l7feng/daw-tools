@@ -6,7 +6,7 @@ repo=Path(__file__).resolve().parents[1]
 validation=repo/'build/native-validation'
 roots=sorted(validation.glob('backend-*'),reverse=True)
 source=next(p for p in roots if (p/'run.json').is_file() and json.loads((p/'run.json').read_text()).get('case')=='full' and json.loads((p/'run.json').read_text()).get('exit_code')==0)
-exe=repo/'build/editor/StudioWorkbench_artefacts/Release/Studio Workbench Verified.exe'
+exe=repo/'build/editor/DawTools_artefacts/Release/DAW Tools Verified.exe'
 root=validation/('app-snapshots-'+datetime.datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:8]);root.mkdir()
 reports=[]
 for name,stem,frozen in [('plugin',False,False),('frozen',False,True),('stems',True,False)]:

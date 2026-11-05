@@ -54,7 +54,7 @@ def main():
     args = parser.parse_args()
     if not 0 < args.timeout <= 300:
         parser.error('timeout must be within (0, 300] seconds')
-    executable = ROOT / 'build/editor/StudioWorkbench_artefacts/Release' / ('Studio Workbench Verified.exe' if args.verified else 'Studio Workbench.exe')
+    executable = ROOT / 'build/editor/DawTools_artefacts/Release' / ('DAW Tools Verified.exe' if args.verified else 'DAW Tools.exe')
     folder = ROOT / 'build/native-validation' / ('scan-' + datetime.datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
     records = scan_batch(args.plugins, folder, [str(executable)], args.timeout, args.verify_studio_fixture)
     (folder / 'worker-sha256.txt').write_text(hashlib.sha256(executable.read_bytes()).hexdigest())

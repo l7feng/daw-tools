@@ -1,6 +1,6 @@
-# Studio Workbench
+# DAW Tools
 
-Windows 原生 DAW 开发版 0.1.2。唯一计划与状态：`D:/1-个人知识库_Vault/4-项目-P/79-通用DAW工作站/Documentation.md`。
+Windows 原生 DAW 开发版 0.1.6。唯一计划与状态：`D:/1-个人知识库_Vault/5-领域-A/06-软件制作/79-DAW Tools/Documentation.md`。
 
 不参考旧软件轨道模板；支持保存用户自行建立的无媒体模板，保留用户轨道、路由、内置处理器和VST3状态。启动为空白工程。
 
@@ -17,7 +17,7 @@ D:\Ai-Files\Tools\BuildEnv\py312\python.exe -X utf8 scripts/run-workbench.py --e
 D:\Ai-Files\Tools\BuildEnv\py312\python.exe -X utf8 scripts/open-gui.py --verified
 ```
 
-Verified入口复用同一源码和构建对象，单独链接`Studio Workbench Verified.exe`，保护可能被占用的默认EXE。界面和Windows文件属性均为0.1.2，不热更新旧窗口。主工具栏“插件链”支持轨道/Master、明确选定VST3扫描、插入/旁通/移除/重排、编辑器与同身份缺失修复。只加载记录的二进制路径/身份，拒绝按名称静默替换。修复前保留恢复点。
+Verified入口复用同一源码和构建对象，单独链接`DAW Tools Verified.exe`，保护可能被占用的默认EXE。界面和Windows文件属性均为0.1.2，不热更新旧窗口。主工具栏“插件链”支持轨道/Master、明确选定VST3扫描、插入/旁通/移除/重排、编辑器与同身份缺失修复。只加载记录的二进制路径/身份，拒绝按名称静默替换。修复前保留恢复点。
 
 原生窗口/按钮回调自动验证与Windows真实输入分别记录；文件选择器文本输入的Computer Use验证未完成，不把回调测试冒充完整鼠标键盘验收。测试使用离线或Hosted软件设备，未重启真实设备长测。
 
@@ -78,7 +78,7 @@ python scripts/scan-plugins.py "build/editor/StudioTestGain_artefacts/Release/VS
 
 ## 0.1.1 GUI与桌面入口
 
-GUI调整为顶部两行操作、主时间线、右侧带可见标签的片段/混音检查器；时间标尺保持约100像素以上主刻度间距。最小窗口1240×850，默认1360×900。桌面`Studio Workbench GUI`快捷方式调用scripts/open-gui.py，每次打开当前最新构建及新的独立空白工作目录，已有工程通过“打开”恢复。更新后重新打开窗口查看版本号；不会替换正在运行的旧窗口，也不提供热重载。音频设备保持关闭。
+GUI调整为顶部两行操作、主时间线、右侧带可见标签的片段/混音检查器；时间标尺保持约100像素以上主刻度间距。最小窗口1240×850，默认1360×900。桌面`DAW Tools`快捷方式调用scripts/open-gui.py，每次打开当前最新构建及新的独立空白工作目录，已有工程通过“打开”恢复。更新后重新打开窗口查看版本号；不会替换正在运行的旧窗口，也不提供热重载。音频设备保持关闭。
 
 ## S1独立设备探针与ASIO
 

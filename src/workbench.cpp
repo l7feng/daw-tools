@@ -14,7 +14,7 @@
 class Window final:public juce::DocumentWindow {
     Session& owner;bool confirming=false;
 public:
-    Window(Session& s,bool keepLayout=true):DocumentWindow("Studio Workbench 0.1.6",juce::Colour(0xff171d26),allButtons),owner(s){
+    Window(Session& s,bool keepLayout=true):DocumentWindow("DAW Tools 0.1.6",juce::Colour(0xff171d26),allButtons),owner(s){
         setUsingNativeTitleBar(true);setContentOwned(new MainPanel(s,keepLayout),true);setResizable(true,true);setResizeLimits(1240,850,4096,2160);centreWithSize(1600,960);setVisible(true);
     }
     void closeButtonPressed() override {
