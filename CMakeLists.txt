@@ -31,6 +31,7 @@ if(STUDIO_BUILD_ENGINE)
   target_compile_definitions(StudioTestGain PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
   target_link_libraries(StudioTestGain PRIVATE juce::juce_audio_utils)
   juce_add_gui_app(DawTools PRODUCT_NAME "DAW Tools" VERSION 0.1.6
+    COMPANY_NAME "l7feng"
     ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon/daw-tools-512.png"
     ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon/daw-tools-512.png")
   juce_generate_juce_header(DawTools)
