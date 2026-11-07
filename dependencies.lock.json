@@ -1,0 +1,26 @@
+{
+  "tracktion_engine": {
+    "tag": "v3.2.0",
+    "commit": "0a5f4e6a5f53d09c89b414a44386a12df7fa1ec6",
+    "url": "https://github.com/Tracktion/tracktion_engine",
+    "license": "GPL-3.0-or-later OR commercial",
+    "archive_sha256": "c8df89135854170d21774f6c70642019ef29e8a4d153da0558492509c12b76ff",
+    "archive_url": "https://codeload.github.com/Tracktion/tracktion_engine/zip/refs/tags/v3.2.0"
+  },
+  "juce": {
+    "commit": "19edd538429c93d277bf95b55aaa7e3eb545f951",
+    "url": "https://github.com/juce-framework/JUCE",
+    "selection": "exact submodule commit from Tracktion v3.2.0",
+    "license": "AGPL-3.0 OR commercial; pinned LICENSE.md inspected",
+    "archive_sha256": "b8891ad168dc036393467844b3d769278eabec182a398947eb5863a4658e8083",
+    "archive_url": "https://codeload.github.com/juce-framework/JUCE/zip/19edd538429c93d277bf95b55aaa7e3eb545f951"
+  },
+  "asio": {
+    "version": "2.3.4",
+    "archive_url": "https://download.steinberg.net/sdk_downloads/ASIO-SDK_2.3.4_2025-10-15.zip",
+    "archive_sha256": "d5ebf0c20dd2c5f43771fd0c1418f4b361bf52434ee670097cfa6b3a335e2eca",
+    "license": "GPL-3.0 alternative selected for local probe; distribution not authorised",
+    "local_path": "third_party/asio-2.3.4/ASIOSDK",
+    "license_sha256": "61e56814f24b32216884b2db0b4dcc317111a5ab354d54d19dd9fc13d71b1c7a"
+  }
+}

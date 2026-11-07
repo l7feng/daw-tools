@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img">
+  <title>DAW Tools</title>
+  <desc>Rounded slate tile with film-frame corner marks, two timeline rules and a symmetric audio waveform with an amber centre bar.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1A2B36"/>
+      <stop offset="1" stop-color="#0C161E"/>
+    </linearGradient>
+    <clipPath id="tile"><rect width="512" height="512" rx="113"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="512" height="512" fill="url(#bg)"/>
+    <rect x="19" y="19" width="474" height="474" rx="97" fill="none" stroke="#35505F" stroke-width="7"/>
+    <g fill="#8FC7D6">
+      <path d="M51 51 H154 V69 H69 V154 H51 Z"/>
+      <path d="M51 51 H154 V69 H69 V154 H51 Z" transform="translate(512,0) scale(-1,1)"/>
+      <path d="M51 51 H154 V69 H69 V154 H51 Z" transform="translate(0,512) scale(1,-1)"/>
+      <path d="M51 51 H154 V69 H69 V154 H51 Z" transform="translate(512,512) scale(-1,-1)"/>
+    </g>
+    <g fill="#4A6875">
+      <rect x="113" y="90" width="287" height="6"/>
+      <rect x="113" y="417" width="287" height="6"/>
+    </g>
+    <g fill="#5DCAA5">
+      <rect x="104.96" y="206.08" width="15.36" height="99.84" rx="7.68"/>
+      <rect x="133.63" y="182.53" width="15.36" height="146.94" rx="7.68"/>
+      <rect x="162.30" y="155.45" width="15.36" height="201.11" rx="7.68"/>
+      <rect x="190.98" y="127.18" width="15.36" height="257.64" rx="7.68"/>
+      <rect x="219.65" y="170.75" width="15.36" height="170.50" rx="7.68"/>
+      <rect x="276.99" y="170.75" width="15.36" height="170.50" rx="7.68"/>
+      <rect x="305.66" y="127.18" width="15.36" height="257.64" rx="7.68"/>
+      <rect x="334.34" y="155.45" width="15.36" height="201.11" rx="7.68"/>
+      <rect x="363.01" y="182.53" width="15.36" height="146.94" rx="7.68"/>
+      <rect x="391.68" y="206.08" width="15.36" height="99.84" rx="7.68"/>
+    </g>
+    <rect x="248.32" y="117.76" width="15.36" height="276.48" rx="7.68" fill="#FAC775"/>
+  </g>
+</svg>

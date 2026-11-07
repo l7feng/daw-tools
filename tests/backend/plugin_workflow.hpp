@@ -1,0 +1,24 @@
+#pragma once
+#include "../plugin_fixture_helpers.hpp"
+static void testPluginWorkflow(const juce::File& root){
+ auto dir=root.getChildFile("plugin-workflow");dir.createDirectory();Session s(dir);s.importAudio(root.getChildFile("source.wav"),0,0);int checks=0;
+ auto fixture=juce::File(STUDIO_SOURCE_ROOT).getChildFile("build/editor/StudioTestGain_artefacts/Release/VST3/Studio Test Gain.vst3");
+ auto scan=[&](juce::File file,int timeout,bool expected){PluginScanJob job;job.start(s,file,timeout);juce::OwnedArray<juce::PluginDescription> types;bool done=false,failed=false;double until=juce::Time::getMillisecondCounterHiRes()+timeout+5000;try{while(!done&&juce::Time::getMillisecondCounterHiRes()<until){juce::MessageManager::getInstance()->runDispatchLoopUntil(10);done=job.poll(types);}}catch(const std::exception&){failed=true;}require(expected?(done&&!failed&&!types.isEmpty()):failed,"Native scan isolation differs");++checks;return types.isEmpty()?juce::PluginDescription():*types[0];};
+ auto desc=scan(fixture,10000,true);
+ scan(juce::File(STUDIO_SOURCE_ROOT).getChildFile("build/backend/StudioScanCrash_artefacts/Release/VST3/Studio Scan Crash.vst3"),3000,false);
+ scan(juce::File(STUDIO_SOURCE_ROOT).getChildFile("build/backend/StudioScanHang_artefacts/Release/VST3/Studio Scan Hang.vst3"),1000,false);desc=scan(fixture,10000,true);
+ for(int mode:{1,2})require(juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("native-scan-entered-"+juce::String(mode)+".txt").existsAsFile(),"Fault plugin factory was not reached");
+ auto& a=PluginChain::add(s,0,desc);auto idA=a.state.getProperty("id");a.getAudioPluginInstance()->getParameters()[0]->setValueNotifyingHost(0.25f);a.flushPluginStateToValueTree();
+ auto& b=PluginChain::add(s,0,desc);auto idB=b.state.getProperty("id");b.getAudioPluginInstance()->getParameters()[0]->setValueNotifyingHost(0.75f);b.flushPluginStateToValueTree();
+ PluginChain::move(s,0,0,1);require(PluginChain::at(s,0,0).state.getProperty("id")==idB&&PluginChain::at(s,0,1).state.getProperty("id")==idA,"Plugin reorder lost identity");++checks;
+ for(int i=0;i<3;++i){auto* processor=PluginChain::at(s,0,0).getAudioPluginInstance();{std::unique_ptr<juce::AudioProcessorEditor> editor(processor->createEditorIfNeeded());require(editor!=nullptr,"Plugin editor failed");}require(processor->getActiveEditor()==nullptr,"Plugin editor retained");++checks;}
+ PluginChain::bypass(s,0,0);s.save();s.reopen();require(!PluginChain::at(s,0,0).isEnabled()&&PluginChain::at(s,0,1).state.getProperty("id")==idA,"Plugin order/bypass save failed");++checks;
+ auto userTemplate=dir.getChildFile("user.swtemplate");s.saveTemplate(userTemplate);s.loadTemplate(userTemplate);require(s.clips().isEmpty()&&PluginChain::external(s,0).size()==2&&!PluginChain::at(s,0,0).isEnabled(),"User template plugin roundtrip failed");require(std::abs(PluginChain::at(s,0,1).getAudioPluginInstance()->getParameters()[0]->getValue()-0.25f)<1e-7f,"Template parameter lost");++checks;
+ s.importAudio(root.getChildFile("source.wav"),0,0);auto& state=PluginChain::at(s,0,1).state;auto chunk=state.getProperty("state").toString();persistMissingPluginFixture(s,0,1,dir.getChildFile("missing.vst3"));require(PluginChain::at(s,0,1).getAudioPluginInstance()==nullptr,"Missing fixture resolved");s.save();s.reopen();require(PluginChain::at(s,0,1).getAudioPluginInstance()==nullptr&&PluginChain::at(s,0,1).state.getProperty("state").toString()==chunk,"Missing state silently repaired during save");++checks;
+ auto wrong=desc;wrong.uniqueId^=1;bool rejected=false;try{PluginChain::repair(s,0,1,wrong);}catch(const std::exception&){rejected=true;}require(rejected&&PluginChain::at(s,0,1).state.getProperty("state").toString()==chunk,"Wrong identity repair accepted");++checks;
+ PluginChain::repair(s,0,1,desc);require(PluginChain::at(s,0,1).state.getProperty("id")==idA&&std::abs(PluginChain::at(s,0,1).getAudioPluginInstance()->getParameters()[0]->getValue()-0.25f)<1e-7f,"Missing plugin repair lost identity/parameter");++checks;
+ auto output=dir.getChildFile("repaired.wav");s.render(output);require(std::abs(readWave(output).getSample(0,12000)-0.00025f)<1e-7f,"Repaired plugin audio differs");++checks;
+ PluginChain::remove(s,0,0);require(PluginChain::external(s,0).size()==1&&PluginChain::at(s,0,0).state.getProperty("id")==idA,"Plugin remove wrong instance");++checks;
+ auto& master=PluginChain::add(s,-1,desc);master.getAudioPluginInstance()->getParameters()[0]->setValueNotifyingHost(0.5f);master.flushPluginStateToValueTree();s.save();s.reopen();require(PluginChain::external(s,-1).size()==1,"Master chain lost");++checks;
+ auto* report=new juce::DynamicObject;report->setProperty("checks",checks);report->setProperty("native_crash_timeout_isolated",true);report->setProperty("physical_device_opened",false);dir.getChildFile("plugin-workflow-result.json").replaceWithText(juce::JSON::toString(juce::var(report)));
+}
