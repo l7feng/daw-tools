@@ -15,7 +15,9 @@ class Window final:public juce::DocumentWindow {
     Session& owner;bool confirming=false;
 public:
     Window(Session& s,bool keepLayout=true):DocumentWindow("DAW Tools 0.1.6",juce::Colour(0xff171d26),allButtons),owner(s){
-        setUsingNativeTitleBar(true);setContentOwned(new MainPanel(s,keepLayout),true);setResizable(true,true);setResizeLimits(1240,850,4096,2160);centreWithSize(1600,960);setVisible(true);
+        setUsingNativeTitleBar(true);setContentOwned(new MainPanel(s,keepLayout),true);setResizable(true,true);setResizeLimits(1080,640,4096,2160);
+  {auto area=juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()?juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userArea:juce::Rectangle<int>(0,0,1600,960);
+   setSize(std::clamp(area.getWidth()-40,1080,1600),std::clamp(area.getHeight()-40,640,960));centreWithSize(getWidth(),getHeight());}setVisible(true);
     }
     void closeButtonPressed() override {
         if(!owner.edit->hasChangedSinceSaved()){juce::JUCEApplication::getInstance()->systemRequestedQuit();return;}
