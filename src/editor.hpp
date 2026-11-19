@@ -6,6 +6,7 @@
 // 界面文字统一入口：中文为源，英文按语言表查；调用处不再直接构造字符串。
 inline juce::String zh(const char* text){return i18n::tr(text);}
 #include "plugin_panel.hpp"
+#include "BinaryData.h"
 // Some Windows accessibility/remote input delivers C0 editing characters without scan codes.
 // Keep Tab, Backspace, Return and Escape unchanged; normal physical shortcuts already pass through.
 inline juce::KeyPress editInputKey(const juce::KeyPress& key){
@@ -21,7 +22,7 @@ namespace EditStyle {
 static juce::Colour bg{0xff252729},panel{0xff303335},edge{0xff141719},text{0xffd8dadd},muted{0xff9ba2a5},accent{0xff2ba4d4},green{0xff47e78a};
 static juce::Colour insertion{0xff1f6f8b},rowOdd{0xff2c3032},rowEven{0xff303436},rowSelected{0xff35434a},ruler{0xff373c3f};
 // 布局尺寸：单一来源，改一处即全局生效。行高可运行时调整（见 MainPanel::setRowHeight）。
-static int topHeight=88,rulerHeight=30,rowHeight=64,controlWidth=340,statusHeight=26;
+static int topHeight=98,rulerHeight=30,rowHeight=64,controlWidth=340,statusHeight=26;
 static constexpr int rowHeightMin=44,rowHeightMax=140,rowHeightStep=8;
 static juce::Colour trackColour(int index){const juce::uint32 colours[]={0xff4d9fd1,0xff39b6bc,0xffab75d3,0xffc6b850,0xff5bb878,0xffce7a65};return juce::Colour(colours[unsigned(index)%6]);}
 static juce::String clock(int64_t n){auto ms=std::max<int64_t>(0,n)*1000/48000;return juce::String(ms/60000)+":"+juce::String((ms/1000)%60).paddedLeft('0',2)+"."+juce::String(ms%1000).paddedLeft('0',3);}
@@ -114,7 +115,7 @@ public:
  enum Command {addTrack,importFile,saveProject,openProject,saveCopy,undoEdit,redoEdit,splitClip,copyClip,removeClip,moveClip,trimClip,envelope,exportWave,saveUserTemplate,openUserTemplate,relinkMedia,crossfadeClips,recovery,plugins};
  EditStyle::Look look;juce::TooltipWindow tips{this,650};ExportJob exportJob;juce::TextButton cancelExport{zh("取消导出")};juce::ComboBox exportDepth;
  Session& session;Timeline timeline;TimeRuler ruler;SyncViewport viewport,trackViewport;juce::Component strips;juce::Viewport navViewport,clipViewport;SideList nav,clipList;
- juce::MenuBarComponent menu{this};juce::Label title,status,help,counter;std::array<juce::Label,10> fieldLabels;juce::Label clipHeading,mixHeading;
+ juce::MenuBarComponent menu{this};juce::Label title,status,help,counter,version;juce::Image brandImage;juce::ImageComponent brandComp;juce::Rectangle<int> brandBounds;std::array<juce::Label,10> fieldLabels;juce::Label clipHeading,mixHeading;
  EditTextEditor start,end,cursor,gain,fadeIn,fadeOut,trackDb,trackPan,masterDb,sendDb;juce::ToggleButton mute{zh("静音")},solo{zh("独奏")},preSend{zh("推子前")};juce::ComboBox outputTrack;juce::Label mixHelp;
  juce::TextButton applyMix{zh("应用混音")},busButton{zh("添加总线")},routeButton{zh("设置输出")},sendButton{zh("添加发送")};juce::Slider zoom;juce::ToggleButton snap{zh("吸附")};
  std::vector<std::unique_ptr<juce::TextButton>> buttons;std::unique_ptr<juce::FileChooser> chooser;std::unique_ptr<PluginsWindow> pluginWindow;std::unique_ptr<HostedPluginWindow> inlineEditor;
@@ -122,7 +123,7 @@ public:
  std::vector<std::unique_ptr<TrackStrip>> rows;bool syncingScroll=false,showLeft=true,showRight=true,persist=false,zoomGesture=false;double zoomAnchorSample=0;int zoomAnchorPixel=0;int leftWidth=165,rightWidth=190,controlWidth=480,bottomMode=0;int dragDivider=0;te::Edit* rowEdit=nullptr;int rowCount=-1;int64_t lastSnapshot=0;int snapshotTicks=0;
  explicit MainPanel(Session& s,bool keepLayout=false):session(s),timeline(s),ruler(timeline),nav(s,false),clipList(s,true),persist(keepLayout){
   setComponentID("edit-workspace");setTitle(zh("编辑工作区"));timeline.setComponentID("timeline");nav.setComponentID("track-navigation");clipList.setComponentID("clip-list");setLookAndFeel(&look);setWantsKeyboardFocus(true);viewport.setViewedComponent(&timeline,false);trackViewport.setViewedComponent(&strips,false);trackViewport.setScrollBarsShown(false,false);navViewport.setViewedComponent(&nav,false);clipViewport.setViewedComponent(&clipList,false);navViewport.setScrollBarsShown(true,false);clipViewport.setScrollBarsShown(true,false);
-  for(auto* c:std::initializer_list<juce::Component*>{&menu,&viewport,&trackViewport,&ruler,&navViewport,&clipViewport,&status,&counter,&zoom,&snap,&properties,&tasks,&routing,&gridSize,&rowMinus,&rowPlus})addAndMakeVisible(*c);
+  for(auto* c:std::initializer_list<juce::Component*>{&menu,&viewport,&trackViewport,&ruler,&navViewport,&clipViewport,&status,&version,&counter,&zoom,&snap,&properties,&tasks,&routing,&gridSize,&rowMinus,&rowPlus,&brandComp})addAndMakeVisible(*c);
   viewport.moved=[this](auto a){if(!syncingScroll){syncingScroll=true;trackViewport.setViewPosition(0,a.getY());syncingScroll=false;}ruler.scrollX=a.getX();ruler.repaint();};trackViewport.moved=[this](auto a){if(!syncingScroll){syncingScroll=true;viewport.setViewPosition(viewport.getViewPositionX(),a.getY());syncingScroll=false;}};
   nav.chosen=[this](int i){selectTrack(i<te::getAudioTracks(*session.edit).size()?i:-1,true);};clipList.chosen=[this](int i){timeline.cancelDrag();timeline.clearTimeSelection();timeline.selected=i;auto* c=session.clips()[i];timeline.selectedTrack=te::getAudioTracks(*session.edit).indexOf(dynamic_cast<te::AudioTrack*>(c->getTrack()));timeline.cursor=Session::samples(c->getPosition().getStart());viewport.setViewPosition(std::max(0,timeline.x(timeline.cursor)-40),timeline.selectedTrack*EditStyle::rowHeight);syncInspector();};
   const std::pair<const char*,Command> specs[]={{"添加轨道",addTrack},{"导入音频",importFile},{"保存",saveProject},{"打开",openProject},{"另存为",saveCopy},{"撤销",undoEdit},{"重做",redoEdit},{"切分",splitClip},{"复制",copyClip},{"删除片段",removeClip},{"移动",moveClip},{"裁剪",trimClip},{"应用增益/淡化",envelope},{"导出 WAV",exportWave},{"保存自定模板",saveUserTemplate},{"从模板新建",openUserTemplate},{"重定位素材",relinkMedia},{"交叉淡化",crossfadeClips},{"保存恢复点",recovery},{"插件链",plugins}};
@@ -139,7 +140,9 @@ public:
   for(auto* c:std::initializer_list<juce::Component*>{&mute,&solo,&preSend,&outputTrack,&applyMix,&busButton,&routeButton,&sendButton,&exportDepth,&cancelExport})addChildComponent(c);
   applyMix.onClick=[this]{action([this]{if(timeline.selectedTrack>=0)session.setMix(timeline.selectedTrack,float(editNumberValue(trackDb)),float(editNumberValue(trackPan)),mute.getToggleState(),solo.getToggleState());session.setMaster(float(editNumberValue(masterDb)));});};busButton.onClick=[this]{action([this]{timeline.selectedTrack=session.addBus();});};routeButton.onClick=[this]{action([this]{session.route(timeline.selectedTrack,outputTrack.getSelectedId()-2);});};sendButton.onClick=[this]{action([this]{session.addSend(timeline.selectedTrack,outputTrack.getSelectedId()-2,float(editNumberValue(sendDb)),preSend.getToggleState());});};
   exportDepth.addItem(zh("PCM 24 位"),24);exportDepth.addItem(zh("浮点 32 位"),32);exportDepth.setSelectedId(24);cancelExport.onClick=[this]{action([this]{exportJob.cancel();});};properties.onClick=[this]{bottomMode=bottomMode==1?0:1;resized();};tasks.onClick=[this]{bottomMode=bottomMode==2?0:2;resized();};routing.onClick=[this]{bottomMode=bottomMode==3?0:3;syncMixer();resized();};
-  timeline.changed=[this]{grabKeyboardFocus();syncInspector();};timeline.execute=[this](auto fn){action([this,fn]{fn();syncInspector();});};counter.setColour(juce::Label::backgroundColourId,juce::Colour(0xff090d0b));counter.setColour(juce::Label::textColourId,EditStyle::green);counter.setFont(juce::FontOptions(15));counter.setJustificationType(juce::Justification::centredLeft);counter.setBorderSize(juce::BorderSize<int>(4,10,4,6));counter.setMinimumHorizontalScale(1.0f);counter.setTooltip(zh("光标时间码 · 30fps显示基准；下行为分秒，不代表视频同步已接入"));status.setFont(juce::FontOptions(11));status.setText(zh("就绪 · 离线编辑 · 0.1.6"),juce::dontSendNotification);
+  timeline.changed=[this]{grabKeyboardFocus();syncInspector();};timeline.execute=[this](auto fn){action([this,fn]{fn();syncInspector();});};counter.setColour(juce::Label::backgroundColourId,juce::Colour(0xff090d0b));counter.setColour(juce::Label::textColourId,EditStyle::green);counter.setFont(juce::FontOptions(15));counter.setJustificationType(juce::Justification::centredLeft);counter.setBorderSize(juce::BorderSize<int>(4,10,4,6));counter.setMinimumHorizontalScale(1.0f);counter.setTooltip(zh("光标时间码 · 30fps显示基准；下行为分秒，不代表视频同步已接入"));status.setFont(juce::FontOptions(11));status.setText(zh("就绪 · 离线编辑"),juce::dontSendNotification);version.setFont(juce::FontOptions(11));version.setColour(juce::Label::textColourId,EditStyle::muted);version.setJustificationType(juce::Justification::right);version.setText("DAW 工作站 | v0.1.7",juce::dontSendNotification);
+  brandImage=juce::ImageCache::getFromMemory(BinaryData::brand_png,BinaryData::brand_pngSize);
+  brandComp.setImage(brandImage);brandComp.setInterceptsMouseClicks(false,false);brandComp.setBufferedToImage(true);
   if(persist)if(auto xml=juce::XmlDocument::parse(layoutFile())){leftWidth=std::clamp(xml->getIntAttribute("left",165),130,260);rightWidth=std::clamp(xml->getIntAttribute("right",190),145,320);showLeft=xml->getBoolAttribute("showLeft",true);showRight=xml->getBoolAttribute("showRight",true);timeline.scale=std::clamp(xml->getDoubleAttribute("zoom",12),5.0,1000.0);zoom.setValue(timeline.scale,juce::dontSendNotification);EditStyle::rowHeight=std::clamp(xml->getIntAttribute("rowHeight",64),EditStyle::rowHeightMin,EditStyle::rowHeightMax);}
   setSize(1600,900);refresh();startTimer(200);
  }
@@ -203,7 +206,7 @@ public:
  void inputEvent(const juce::String& event){if(!inputProbe)return;lastInputEvent=event;++inputEventCount;session.root.getChildFile("gui-input-events.log").appendText(event+"\n");writeInputProbe();}
  void writeInputProbe(){auto* out=new juce::DynamicObject;auto* focus=juce::Component::getCurrentlyFocusedComponent();juce::String focusId;for(auto* c=focus;c&&focusId.isEmpty();c=c->getParentComponent())focusId=c->getComponentID();out->setProperty("focus",focusId);out->setProperty("last_event",lastInputEvent);out->setProperty("event_count",inputEventCount);out->setProperty("start",start.getText());out->setProperty("end",end.getText());out->setProperty("cursor_text",cursor.getText());out->setProperty("cursor",double(timeline.cursor));out->setProperty("selected_track",timeline.selectedTrack);out->setProperty("scale",timeline.scale);out->setProperty("zoom_anchor_sample",zoomAnchorSample);out->setProperty("zoom_anchor_pixel",zoomAnchorPixel);out->setProperty("scroll_x",viewport.getViewPositionX());out->setProperty("scroll_y",viewport.getViewPositionY());out->setProperty("ruler_x",ruler.scrollX);out->setProperty("time_start",double(timeline.selectionStart));out->setProperty("time_end",double(timeline.selectionEnd));juce::Array<juce::var> names,editors,clips;for(auto* t:te::getAudioTracks(*session.edit))names.add(t->getName());for(auto& row:rows)editors.add(row->name.getText());for(auto* c:session.clips()){auto* item=new juce::DynamicObject;item->setProperty("start",double(Session::samples(c->getPosition().getStart())));item->setProperty("end",double(Session::samples(c->getPosition().getEnd())));clips.add(juce::var(item));}out->setProperty("track_names",names);out->setProperty("editor_names",editors);out->setProperty("clips",clips);session.root.getChildFile("gui-input-state.json").replaceWithText(juce::JSON::toString(juce::var(out)));}
  juce::StringArray getMenuBarNames()override{return {zh("文件"),zh("编辑"),zh("视图"),zh("轨道"),zh("片段"),zh("选项"),zh("窗口"),zh("帮助")};}
- juce::PopupMenu getMenuForIndex(int index,const juce::String&)override{juce::PopupMenu m;auto item=[&](Command c,const char* text){m.addItem(100+int(c),zh(text));};if(index==0){item(openProject,"打开工程…");item(importFile,"导入音频…");item(saveProject,"保存    Ctrl+S");item(saveCopy,"另存为…");m.addSeparator();item(recovery,"保存恢复点");item(saveUserTemplate,"保存用户模板…");item(openUserTemplate,"从用户模板新建…");item(relinkMedia,"重定位素材…");m.addSeparator();item(exportWave,"导出 WAV…");}if(index==1){item(undoEdit,"撤销    Ctrl+Z");item(redoEdit,"重做    Ctrl+Shift+Z");item(copyClip,"复制到光标");item(removeClip,"删除片段    Delete");}if(index==2){m.addItem(1,zh("轨道列表"),true,showLeft);m.addItem(2,zh("片段列表"),true,showRight);m.addItem(3,zh("片段属性"),true,bottomMode==1);m.addItem(4,zh("路由属性"),true,bottomMode==3);m.addSeparator();m.addItem(5,zh("恢复默认布局"));}if(index==3){item(addTrack,"新建音轨");m.addItem(6,zh("新建总线"));item(plugins,"插件链…");}if(index==4){item(splitClip,"在光标处切分");item(moveClip,"移动至属性起点");item(trimClip,"按属性范围裁剪");item(envelope,"应用增益与淡化");item(crossfadeClips,"交叉淡化");}if(index==5){m.addItem(7,zh("网格吸附"),true,snap.getToggleState());m.addItem(8,zh("时间码显示：30 fps"),false);}if(index==6){item(plugins,"当前轨道插件链…");m.addItem(9,zh("后台任务"));}if(index==7){m.addItem(10,"DAW Tools 0.1.6",false);m.addItem(11,zh("设备播放/录音尚未接入此窗口"),false);}return m;}
+ juce::PopupMenu getMenuForIndex(int index,const juce::String&)override{juce::PopupMenu m;auto item=[&](Command c,const char* text){m.addItem(100+int(c),zh(text));};if(index==0){item(openProject,"打开工程…");item(importFile,"导入音频…");item(saveProject,"保存    Ctrl+S");item(saveCopy,"另存为…");m.addSeparator();item(recovery,"保存恢复点");item(saveUserTemplate,"保存用户模板…");item(openUserTemplate,"从用户模板新建…");item(relinkMedia,"重定位素材…");m.addSeparator();item(exportWave,"导出 WAV…");}if(index==1){item(undoEdit,"撤销    Ctrl+Z");item(redoEdit,"重做    Ctrl+Shift+Z");item(copyClip,"复制到光标");item(removeClip,"删除片段    Delete");}if(index==2){m.addItem(1,zh("轨道列表"),true,showLeft);m.addItem(2,zh("片段列表"),true,showRight);m.addItem(3,zh("片段属性"),true,bottomMode==1);m.addItem(4,zh("路由属性"),true,bottomMode==3);m.addSeparator();m.addItem(5,zh("恢复默认布局"));}if(index==3){item(addTrack,"新建音轨");m.addItem(6,zh("新建总线"));item(plugins,"插件链…");}if(index==4){item(splitClip,"在光标处切分");item(moveClip,"移动至属性起点");item(trimClip,"按属性范围裁剪");item(envelope,"应用增益与淡化");item(crossfadeClips,"交叉淡化");}if(index==5){m.addItem(7,zh("网格吸附"),true,snap.getToggleState());m.addItem(8,zh("时间码显示：30 fps"),false);}if(index==6){item(plugins,"当前轨道插件链…");m.addItem(9,zh("后台任务"));}if(index==7){m.addItem(10,zh("DAW 工作站"),false);m.addItem(11,zh("设备播放/录音尚未接入此窗口"),false);}return m;}
  void menuItemSelected(int id,int)override{if(id>=100){perform(Command(id-100));return;}if(id==1)showLeft=!showLeft;if(id==2)showRight=!showRight;if(id==3)bottomMode=bottomMode==1?0:1;if(id==4)bottomMode=bottomMode==3?0:3;if(id==5){showLeft=showRight=true;leftWidth=165;rightWidth=190;bottomMode=0;zoom.setValue(12);}if(id==6)busButton.onClick();if(id==7){snap.setToggleState(!snap.getToggleState(),juce::dontSendNotification);setGrid();}if(id==9)bottomMode=2;resized();}
  bool keyPressed(const juce::KeyPress& incoming)override{auto key=editInputKey(incoming);inputEvent("workspace-key-"+key.getTextDescription());if(key.getModifiers().isCommandDown()&&key.getKeyCode()=='S'){perform(saveProject);return true;}auto* focus=juce::Component::getCurrentlyFocusedComponent();for(auto* c=focus;c&&c!=this;c=c->getParentComponent())if(dynamic_cast<juce::TextEditor*>(c)||dynamic_cast<juce::ComboBox*>(c))return false;if(key.isKeyCode(juce::KeyPress::escapeKey)){timeline.cancelDrag();return true;}if(key.getModifiers().isCommandDown()){if(key.getKeyCode()=='Z'){perform(key.getModifiers().isShiftDown()?redoEdit:undoEdit);return true;}if(key.getKeyCode()=='Y'){perform(redoEdit);return true;}if(key.getKeyCode()=='S'){perform(saveProject);return true;}if(key.getKeyCode()=='O'){perform(openProject);return true;}if(key.getKeyCode()=='I'){perform(importFile);return true;}}if(key.getKeyCode()==juce::KeyPress::deleteKey){perform(removeClip);return true;}return false;}
  bool isInterestedInFileDrag(const juce::StringArray& files)override{for(auto f:files)if(juce::File(f).hasFileExtension("wav;bwf;aif;aiff;flac"))return true;return false;}
@@ -216,13 +219,13 @@ public:
   const int top=EditStyle::topHeight,head=EditStyle::rulerHeight;
   const int bottom=bottomMode?146:EditStyle::statusHeight;
   const int workH=std::max(120,h-top-head-bottom);
-  menu.setBounds(0,0,w,25);
+  menu.setBounds(0,26,w,20);
   groupDividers.clear();
   // 第一行：走带 | 计数器 | 网格 | 缩放 | 编辑模式 | 工具 | 行高
-  const int r1=30,rh=26;int x=6;
+  const int r1=48,rh=24;int x=6;
   for(int i=0;i<5;++i){auto& b=transport[size_t(i)];b.setComponentID("transport-"+juce::String(i));b.setBounds(x+i*36,r1,34,rh);}
   x+=5*36+2;groupDividers.push_back(x-2);x+=4;
-  counter.setBounds(x,r1,168,rh+24);x+=170;groupDividers.push_back(x-2);x+=2;
+  counter.setBounds(x,r1,168,rh+18);x+=170;groupDividers.push_back(x-2);x+=2;
   gridSize.setBounds(x,r1,86,rh);snap.setBounds(x+90,r1,62,rh);x+=156;groupDividers.push_back(x-2);x+=2;
   const int zoomW=std::clamp(w-8-966,60,132);
   zoom.setBounds(x,r1+2,zoomW,rh-4);x+=zoomW+6;groupDividers.push_back(x-2);x+=2;
@@ -232,7 +235,7 @@ public:
   x+=3*50+2;groupDividers.push_back(x-2);x+=4;
   rowMinus.setBounds(x,r1,24,rh);rowPlus.setBounds(x+26,r1,24,rh);
   // 第二行：编辑命令 | 采样字段
-  const int r2=60,rh2=24;const bool narrow=w<1180;
+  const int r2=76,rh2=20;const bool narrow=w<1180;
   const int fieldsW=w>=1440?414:(w>=1180?360:318);const int step=fieldsW/3,labelW=narrow?26:48,fieldW=step-labelW-2;
   const int fx=w-fieldsW;int bx=366;const int cmdW=std::clamp((fx-bx-8)/8-2,42,76);const int cmdIds[]={5,6,0,1,2,3,4,13};
   for(int id:cmdIds){auto& b=*buttons[size_t(id)];b.setVisible(true);b.setComponentID("cmd-"+juce::String(id));b.setBounds(bx,r2,cmdW,rh2);bx+=cmdW+2;}
@@ -258,6 +261,7 @@ public:
   const int by=h-bottom;
   properties.setBounds(4,h-26,84,23);routing.setBounds(90,h-26,64,23);tasks.setBounds(156,h-26,54,23);
   status.setBounds(216,h-27,std::max(60,w-424),25);
+  version.setBounds(w-176,h-27,168,25);
   properties.setToggleState(bottomMode==1,juce::dontSendNotification);
   routing.setToggleState(bottomMode==3,juce::dontSendNotification);
   tasks.setToggleState(bottomMode==2,juce::dontSendNotification);
@@ -276,6 +280,8 @@ public:
       const int cw=(c==&outputTrack)?std::min(150,bw+46):bw;
       c->setVisible(true);c->setBounds(bx2,by+30,cw,27);bx2+=cw+6;}
   }
+  const int brandH=18,brandW=juce::jmax(30,juce::roundToInt(brandH*1337.0/160.0));
+  brandBounds=juce::Rectangle<int>(w-10-brandW,3,brandW,brandH);brandComp.setBounds(brandBounds);
   ruler.scrollX=viewport.getViewPositionX();repaint();
  }
 
@@ -285,8 +291,9 @@ public:
   g.fillAll(EditStyle::bg);
   // 顶区：菜单条 + 工具区
   g.setColour(EditStyle::panel);g.fillRect(0,0,w,top);
-  g.setColour(EditStyle::edge);g.drawHorizontalLine(25,0,float(w));g.drawHorizontalLine(top-1,0,float(w));
-  for(int x:groupDividers)g.drawVerticalLine(x,29,float(top-4));
+  if(brandImage.isValid())g.drawImageWithin(brandImage,brandBounds.getX(),brandBounds.getY(),brandBounds.getWidth(),brandBounds.getHeight(),juce::RectanglePlacement::centred,true);
+  g.setColour(EditStyle::edge);g.drawHorizontalLine(26,0,float(w));g.drawHorizontalLine(top-1,0,float(w));
+  for(int x:groupDividers)g.drawVerticalLine(x,48,float(top-4));
   // 轨道控制列表头
   g.setColour(EditStyle::ruler);g.fillRect(left+2,top,EditStyle::controlWidth,head);
   g.setColour(EditStyle::edge);g.drawHorizontalLine(top+head-1,float(left),float(left+EditStyle::controlWidth));
@@ -308,7 +315,7 @@ public:
   g.drawHorizontalLine(h-EditStyle::statusHeight,0,float(w));
   // 底栏右侧常驻信息
   g.setColour(EditStyle::muted);g.setFont(10);
-  g.drawText(zh("48 kHz · 24 bit · 离线编辑"),w-190,h-EditStyle::statusHeight,182,EditStyle::statusHeight,juce::Justification::right);
+  g.drawText(zh("48 kHz · 24 bit · 离线编辑"),w-356,h-EditStyle::statusHeight,172,EditStyle::statusHeight,juce::Justification::right);
   const int by=h-(bottomMode?146:EditStyle::statusHeight);
   g.setColour(EditStyle::edge);g.drawHorizontalLine(by,0,float(w));
   if(bottomMode==2){g.setColour(EditStyle::text);g.drawText(exportJob.active?zh("后台任务正在执行，进度见状态栏"):zh("当前没有运行中的导出任务"),335,by+35,600,27,juce::Justification::left);}

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(DawTools VERSION 0.1.6 LANGUAGES CXX)
+project(DawTools VERSION 0.1.7 LANGUAGES CXX)
 if(MSVC)
   add_compile_options(/utf-8)
 endif()
@@ -30,15 +30,20 @@ if(STUDIO_BUILD_ENGINE)
   target_compile_features(StudioTestGain PRIVATE cxx_std_20)
   target_compile_definitions(StudioTestGain PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
   target_link_libraries(StudioTestGain PRIVATE juce::juce_audio_utils)
-  juce_add_gui_app(DawTools PRODUCT_NAME "DAW Tools" VERSION 0.1.6
+  juce_add_binary_data(DawBrandData SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/assets/brand.png")
+  juce_add_gui_app(DawTools PRODUCT_NAME "DAW Tools" VERSION 0.1.7
     COMPANY_NAME "l7feng"
-    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon/daw-tools-512.png"
-    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon/daw-tools-512.png")
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/app.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/app.png")
   juce_generate_juce_header(DawTools)
   if(WIN32)
     # Pinned JUCE's RC custom command omits its generated Info.txt dependency.
     add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/DawTools_artefacts/JuceLibraryCode/DawTools_resources.rc"
       APPEND DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/DawTools_artefacts/JuceLibraryCode/Info.txt")
+    # The RC text does not change when the artwork changes, so the compiled
+    # resource must depend on the icon PNG or a rebuild keeps the old icon.
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/DawTools_artefacts/JuceLibraryCode/DawTools_resources.rc"
+      PROPERTIES OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/app.png")
   endif()
   target_sources(DawTools PRIVATE src/workbench.cpp)
   set_property(SOURCE src/workbench.cpp PROPERTY OBJECT_DEPENDS
@@ -49,5 +54,5 @@ if(STUDIO_BUILD_ENGINE)
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_PLUGINHOST_VST3=1 TRACKTION_ENABLE_TIMESTRETCH_SOUNDTOUCH=1)
   target_link_libraries(DawTools PRIVATE tracktion::tracktion_engine tracktion::tracktion_core
-    tracktion::tracktion_graph juce::juce_audio_utils juce::juce_cryptography)
+    tracktion::tracktion_graph juce::juce_audio_utils juce::juce_cryptography DawBrandData)
 endif()

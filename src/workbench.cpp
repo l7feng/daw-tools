@@ -14,7 +14,7 @@
 class Window final:public juce::DocumentWindow {
     Session& owner;bool confirming=false;
 public:
-    Window(Session& s,bool keepLayout=true):DocumentWindow("DAW Tools 0.1.6",juce::Colour(0xff171d26),allButtons),owner(s){
+    Window(Session& s,bool keepLayout=true):DocumentWindow(zh("DAW 工作站"),juce::Colour(0xff171d26),allButtons),owner(s){
         setUsingNativeTitleBar(true);setContentOwned(new MainPanel(s,keepLayout),true);setResizable(true,true);setResizeLimits(1080,640,4096,2160);
   {auto area=juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()?juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()->userArea:juce::Rectangle<int>(0,0,1600,960);
    setSize(std::clamp(area.getWidth()-40,1080,1600),std::clamp(area.getHeight()-40,640,960));centreWithSize(getWidth(),getHeight());}setVisible(true);
@@ -30,7 +30,7 @@ class App final:public juce::JUCEApplication {
 public:
     std::unique_ptr<Session> session;std::unique_ptr<Window> window;
     const juce::String getApplicationName() override{return "StudioWorkbenchValidation";}
-    const juce::String getApplicationVersion() override{return "0.1.6";}
+    const juce::String getApplicationVersion() override{return "0.1.7";}
     void initialise(const juce::String& line) override {
         auto args=juce::StringArray::fromTokens(line,false);int index=args.indexOf("--workspace");
         if(index<0 || index+1>=args.size() || !juce::File::isAbsolutePath(args[index+1])) {setApplicationReturnValue(2);quit();return;}

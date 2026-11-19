@@ -148,7 +148,7 @@ public:
         require(allowReplace||!target.exists(),"Project destination exists");
         auto staging=target.getSiblingFile(target.getFileName()+"."+juce::Uuid().toString()+".partial");
         validateFrozenTracks();updatePluginCatalog();
-        edit->state.setProperty("studioVersion","0.1.0",nullptr);
+        edit->state.setProperty("studioVersion","0.1.7",nullptr);
         edit->state.setProperty("studioProjectID",edit->getProjectItemID().toString(),nullptr);
         for(auto* track:te::getAudioTracks(*edit))if(track->isFrozen(te::Track::individualFreeze)){
             auto source=te::TemporaryFileManager::getFreezeFileForTrack(*track);require(source.existsAsFile(),"Frozen cache missing before save");auto hash=juce::SHA256(source).toHexString();
